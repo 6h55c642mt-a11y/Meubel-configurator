@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Meubel-configurator</title>
+  <meta name="description" content="Ontwerp een kast op maat in 3D en exporteer tekeningen, onderdelenlijst en DXF-zaagbestanden voor zelfbouw.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='4' y='5' width='24' height='22' rx='2' fill='%23c9733a'/><path d='M16 5v22M4 16h12' stroke='%23fff' stroke-width='2'/></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
+      "jspdf": "https://cdn.jsdelivr.net/npm/jspdf@2.5.2/+esm"
+    }
+  }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><rect x="4" y="5" width="24" height="22" rx="2" fill="var(--accent)"/><path d="M16 5v22M4 16h12" stroke="#fff" stroke-width="2"/></svg>
+      <span>Meubel&#8209;configurator</span>
+    </div>
+    <input id="projName" class="projname" aria-label="Projectnaam" spellcheck="false">
+    <div class="topactions">
+      <button class="btn ghost" data-act="undo" title="Ongedaan maken (Ctrl+Z)">↶</button>
+      <button class="btn ghost" data-act="redo" title="Opnieuw (Ctrl+Shift+Z)">↷</button>
+      <button class="btn ghost" data-act="new">Nieuw</button>
+      <button class="btn" data-act="save">Opslaan</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside id="panel" class="panel" aria-label="Configuratiestappen"></aside>
+    <section class="stage">
+      <div id="viewer" class="viewer"></div>
+      <div class="viewbar" id="viewbar"></div>
+      <div class="stagefoot" id="stagefoot"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status"></div>
+  <input type="file" id="fileOpen" accept=".json,application/json" hidden>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
