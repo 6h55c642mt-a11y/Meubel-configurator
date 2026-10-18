@@ -1,7 +1,7 @@
 // PDF-overzicht: axonometrie, vooraanzicht en zijaanzicht met maatvoering,
 // beslaglijst, frontenlijst, zaaglijst en zaagplannen.
 import { jsPDF } from 'jspdf';
-import { MATERIALS, FINISHES, HANDLE_TYPES, FRONT_TYPES, colorName, plinthH } from './model.js';
+import { MATERIALS, FINISHES, HANDLE_TYPES, FRONT_TYPES, colorName, plinthH, grainOn } from './model.js';
 
 const PW = 297, PH = 210, M = 14;
 const INK = [35, 34, 32], MUTED = [139, 134, 124], LINE = [210, 205, 195], ACC = [201, 115, 58];
@@ -78,11 +78,11 @@ export async function exportPdf(d, geo, nest, { axo }) {
 
   // ---------- 4. zaaglijst ----------
   header('Zaaglijst');
-  const rows = geo.parts.map(p => [String(p.num), p.name, `${fmt(p.size.L)}`, `${fmt(p.size.B)}`, `${p.size.T}`,
-    shortMat(p), MATERIALS[p.mat.type]?.grain ? 'L' : '–', String(p.holes.filter(h => h.kind !== 'pin').length || ''), String(p.holes.filter(h => h.kind === 'pin').length || '')]);
+  const rows = geo.parts.map(p => [String(p.num), p.name + (p.notes?.length ? ` (${p.notes.join(', ')})` : ''), `${fmt(p.size.L)}`, `${fmt(p.size.B)}`, `${p.size.T}`,
+    shortMat(p), grainOn(d, p.mat.type) ? 'L' : '–', String(p.holes.filter(h => h.kind !== 'pin').length || ''), String(p.holes.filter(h => h.kind === 'pin').length || '')]);
   table(doc, M, M + 22, [
-    { t: 'Nr', w: 12 }, { t: 'Onderdeel', w: 64 }, { t: 'Lengte', w: 22, a: 'right' }, { t: 'Breedte', w: 22, a: 'right' }, { t: 'Dikte', w: 16, a: 'right' },
-    { t: 'Materiaal', w: 70 }, { t: 'Nerf', w: 14, a: 'center' }, { t: 'Boorgaten', w: 22, a: 'right' }, { t: 'Gaatjesrij', w: 22, a: 'right' },
+    { t: 'Nr', w: 12 }, { t: 'Onderdeel', w: 84 }, { t: 'Lengte', w: 22, a: 'right' }, { t: 'Breedte', w: 22, a: 'right' }, { t: 'Dikte', w: 16, a: 'right' },
+    { t: 'Materiaal', w: 52 }, { t: 'Nerf', w: 12, a: 'center' }, { t: 'Boorgaten', w: 22, a: 'right' }, { t: 'Gaatjesrij', w: 22, a: 'right' },
   ], rows, header, 'Zaaglijst (vervolg)');
   doc.setFontSize(7.5); doc.setTextColor(...MUTED);
   doc.text('Lengte = langs de nerf. Maten zijn netto zaagmaten in mm. Boorgaten: deuvels Ø8 en scharnierpotten Ø35, zie DXF voor posities.', M, PH - 8);
@@ -144,12 +144,12 @@ function drawViews(doc, d, geo) {
   const DD = d.D + tf;
   const areaX = M + 18, areaY = M + 30, areaW = PW - 2 * M - 30, areaH = PH - areaY - 26;
   const gap = 260;
-  const s = Math.min(areaW / (d.W + gap + DD + 200), areaH / (d.H + 180));
+  const s = Math.min(areaW / (d.W + gap + DD + 200), areaH / (d.H + 260));
   const ox = areaX + 10, oy = areaY + areaH - 12; // vloer
   const X = x => ox + x * s, Y = y => oy - y * s;
 
   doc.setFontSize(8); doc.setTextColor(...MUTED);
-  doc.text(`VOORAANZICHT  1:${niceScale(s)}`, X(0), Y(d.H) - 20);
+  doc.text(`VOORAANZICHT  1:${niceScale(s)}`, X(0), M + 21);
 
   // korpus
   doc.setDrawColor(...INK);
@@ -157,11 +157,18 @@ function drawViews(doc, d, geo) {
     doc.setLineWidth(lw);
     doc.rect(X(b[0]), Y(b[3]), (b[1] - b[0]) * s, (b[3] - b[2]) * s, fill ? 'FD' : 'S');
   };
+  const shape = (p, lw, fill) => {
+    if (!p.prism) return rect(p.box, lw, fill);
+    doc.setLineWidth(lw);
+    const pts = p.prism.poly.map(([x, y]) => [X(x), Y(y)]);
+    const rel = pts.slice(1).map((q, i) => [q[0] - pts[i][0], q[1] - pts[i][1]]);
+    doc.lines(rel, pts[0][0], pts[0][1], [1, 1], fill ? 'FD' : 'S', true);
+  };
   doc.setFillColor(255, 255, 255);
-  for (const p of geo.parts) if (p.group === 'korpus' || p.group === 'plint') rect(p.box, 0.2);
+  for (const p of geo.parts) if (p.group === 'korpus' || p.group === 'plint') shape(p, 0.2);
   // fronten
   for (const p of geo.parts.filter(q => q.group === 'front')) {
-    rect(p.box, 0.35, true);
+    shape(p, 0.35, true);
     const b = p.box, h = p.meta.hinge;
     if (h) {
       doc.setLineDashPattern([1.2, 1], 0); doc.setLineWidth(0.15);
@@ -200,20 +207,26 @@ function drawViews(doc, d, geo) {
   }
   // maatlijnen
   doc.setTextColor(...INK);
-  dimH(doc, X(0), X(d.W), Y(d.H) - 8, String(d.W));
+  dimH(doc, X(0), X(d.W), Y(d.H) - 12, String(d.W));
   const xs = [0, ...geo.picks.filter(q => q.k === 0).flatMap(q => [q.x0, q.x1]), d.W].sort((a, b) => a - b);
   const chainX = []; for (const x of xs) if (!chainX.length || Math.abs(chainX[chainX.length - 1] - x) > 0.5) chainX.push(x);
   for (let i = 0; i < chainX.length - 1; i++) {
     const a = chainX[i], b = chainX[i + 1];
     dimH(doc, X(a), X(b), Y(0) + 8, (b - a) * s > 6 ? String(Math.round(b - a)) : '', true);
   }
-  dimV(doc, X(0) - 9, Y(0), Y(d.H), String(d.H));
+  const prof = geo.dims.profile;
+  dimV(doc, X(0) - 9, Y(0), Y(prof[0][1]), String(prof[0][1]));
+  if (geo.dims.shaped) {
+    doc.setFontSize(6.5); doc.setTextColor(...ACC);
+    prof.forEach(([x, y], i) => { doc.circle(X(x), Y(y), 0.7, 'S'); doc.text(`P${i + 1} (${x}, ${y})`, X(x), Y(y) - 2.2, { align: i === 0 ? 'left' : i === prof.length - 1 ? 'right' : 'center' }); });
+    doc.setTextColor(...INK);
+  }
   // rechts: ketting laatste kolom + sokkel
   const last = d.columns.length - 1;
   const ys = [0]; const P = plinthH(d);
   if (P) ys.push(P);
   geo.picks.filter(q => q.col === last).forEach(q => ys.push(q.y0, q.y1));
-  ys.push(d.H);
+  ys.push(geo.dims.profile[geo.dims.profile.length - 1][1]);
   const chainY = [...new Set(ys.map(v => Math.round(v * 10) / 10))].sort((a, b) => a - b);
   for (let i = 0; i < chainY.length - 1; i++) {
     const a = chainY[i], b = chainY[i + 1];
@@ -224,7 +237,7 @@ function drawViews(doc, d, geo) {
   const sx = d.W + gap; // x-positie (mm) van zijaanzicht
   const Z = z => X(sx + z);
   doc.setFontSize(8); doc.setTextColor(...MUTED);
-  doc.text('ZIJAANZICHT', Z(0), Y(d.H) - 20);
+  doc.text('ZIJAANZICHT', Z(0), M + 21);
   doc.setDrawColor(...INK);
   const sideRect = (z0, z1, y0, y1, lw = 0.3) => { doc.setLineWidth(lw); doc.rect(Z(z0), Y(y1), (z1 - z0) * s, (y1 - y0) * s); };
   sideRect(dm.zB, dm.zF, 0, d.H - d.t, 0.35);          // zijwand

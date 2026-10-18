@@ -2,6 +2,7 @@ import {
   defaultDesign, normalize, setColumnCount, setCellCount, equalizeColumns, equalizeCells,
   setColWidth, setCellHeight, moveShelfTo, moveDividerTo, frontOwner, cellY,
   MATERIALS, PALETTE, FRONT_TYPES, INTERIORS, HANDLE_TYPES, FINISHES, colorName, uid, clamp,
+  setShapePreset, addShapePoint, moveShapePoint, SHAPE_PRESETS, grainOn,
 } from './model.js';
 import { buildGeometry } from './geometry.js';
 import { Viewer } from './viewer.js';
@@ -44,10 +45,12 @@ const viewer = new Viewer($('#viewer'), {
   },
   onMoveShelf(col, k, yTop) { dragUndo(); moveShelfTo(state.d, col, k, yTop); refresh(false); },
   onMoveDivider(i, x) { dragUndo(); moveDividerTo(state.d, i, x); refresh(false); },
+  onMoveShapePoint(i, x, y) { dragUndo(); moveShapePoint(state.d, i, x, y); normalize(state.d); refresh(false); },
+  onSelectShapePoint(i) { state.step = 1; renderPanel(); const el = document.querySelector(`input[data-field="pt"][data-i="${i}"]`); el && el.focus(); },
   onDragEnd() { dragging = false; renderPanel(); },
   onEditCellHeight(col, k, h) { commit(d => setCellHeight(d, col, k, h)); },
   onEditColWidth(i, w) { commit(d => setColWidth(d, i, w)); },
-  onEditOverall(key, v) { commit(d => { d[key] = v; }); },
+  onEditOverall(key, v) { commit(d => { if (key === 'H' && d.shape.on) { const f = v / d.H; d.shape.pts = d.shape.pts.map(([x, y]) => [x, y * f]); } else d[key] = v; }); },
 });
 viewer.setView(state.view);
 
@@ -88,6 +91,7 @@ function cleanSel() {
 let saveTimer;
 function refresh(panel = true) {
   cleanSel();
+  viewer.view.shapeEdit = state.step === 1;
   state.geo = buildGeometry(state.d);
   viewer.update(state.d, state.geo, state.sel);
   if (panel) renderPanel();
@@ -149,7 +153,19 @@ const BODIES = {
         ${numField('W', d.W, { min: 300, max: 6000, step: 10, range: true, name: 'Breedte' })}
         ${numField('H', d.H, { min: 200, max: 3000, step: 10, range: true, name: 'Hoogte' })}
         ${numField('D', d.D, { min: 150, max: 900, step: 10, range: true, name: 'Diepte' })}
-        <div class="hint">Diepte is de korpusdiepte inclusief achterwand; fronten komen daar ${d.t} mm bij. Totaal: <b>${d.D + d.t} mm</b>.</div>
+        <div class="hint">Diepte is de korpusdiepte inclusief achterwand; fronten komen daar ${d.t} mm bij. Totaal: <b>${d.D + d.t} mm</b>.${d.shape.on ? ' Hoogte = hoogste punt van de bovenrand.' : ''}</div>
+      </div>
+      <div class="field"><label>Vorm bovenrand</label>
+        <div class="seg">${SHAPE_PRESETS.map(([k, l]) => `<button data-act="shape" data-val="${k}">${l}</button>`).join('')}</div>
+        ${d.shape.on ? `
+          <div class="pts">${d.shape.pts.map((p, i) => `
+            <div class="ptrow"><span class="idx">P${i + 1}</span>
+              <div class="num"><span class="unit">x</span><input data-field="pt" data-i="${i}" data-c="0" value="${p[0]}" ${i === 0 || i === d.shape.pts.length - 1 ? 'disabled' : ''}></div>
+              <div class="num"><span class="unit">y</span><input data-field="pt" data-i="${i}" data-c="1" value="${p[1]}"></div>
+              ${i > 0 && i < d.shape.pts.length - 1 ? `<button class="x" data-act="delpt" data-i="${i}" aria-label="Punt verwijderen">✕</button>` : '<span></span>'}
+            </div>`).join('')}</div>
+          <div class="row"><button class="btn ghost small" data-act="addpt">+ Punt toevoegen</button><span class="hint">Sleep de oranje punten in de weergave; in 2D gaat dat het makkelijkst.</span></div>` :
+          '<div class="hint">Kies een vorm om een schuine of geknikte bovenrand te maken, bijvoorbeeld onder een schuin dak of een trap. Daarna kun je de punten verslepen of in mm invullen.</div>'}
       </div>
       <div class="field"><label>Plaatdikte korpus en fronten</label>${seg('set', [[15, '15 mm'], [18, '18 mm'], [22, '22 mm'], [25, '25 mm']], d.t, 'data-field="t"')}</div>
       <div class="field"><label>Achterwand</label>
@@ -279,7 +295,7 @@ const BODIES = {
 
   7() {
     const d = state.d, g = state.geo;
-    const nest = nestParts(g.parts, d.sheet);
+    const nest = nestParts(g.parts, d.sheet, d);
     const sheets = nest.reduce((a, n) => a + n.sheets.length, 0);
     const area = g.parts.reduce((a, p) => a + p.size.L * p.size.B, 0) / 1e6;
     const fronts = g.parts.filter(p => p.group === 'front').length;
@@ -293,7 +309,10 @@ const BODIES = {
         <div class="stat"><b>${fronts}</b><span>fronten</span></div>
       </div>
       <div class="field"><label>Zaagplaten</label>
-        <ul class="list">${nest.map(n => `<li><span>${esc(n.label)}</span><span class="q">${n.sheets.length}× · ${n.sheets.map(s => Math.round(s.used * 100) + '%').join(' ')}</span></li>`).join('')}</ul></div>
+        <ul class="list">${nest.map(n => `<li><span>${esc(n.label)}</span>
+          <label class="toggle mini-t" title="Nerfrichting aanhouden: onderdelen niet draaien"><input type="checkbox" data-grain="${n.type}" ${grainOn(d, n.type) ? 'checked' : ''}>nerf</label>
+          <span class="q">${n.sheets.length}× · ${n.sheets.map(s => Math.round(s.used * 100) + '%').join(' ')}</span></li>`).join('')}</ul>
+        <div class="hint">Zet nerf uit voor plaat zonder richting (MDF, gelakt): dan mogen delen gedraaid worden en nest hij zuiniger.</div></div>
       <div class="field"><label>Plaatformaat & zagen</label>
         ${numField('sheet.L', d.sheet.L, { min: 1000, max: 3100, step: 10, name: 'Lengte' })}
         ${numField('sheet.W', d.sheet.W, { min: 600, max: 2100, step: 10, name: 'Breedte' })}
@@ -303,6 +322,8 @@ const BODIES = {
       <div class="field"><label>Exporteren</label>
         <button class="btn accent wide" data-act="pdf"><span>PDF-overzicht</span><span>tekening · beslag · zaaglijst</span></button>
         <button class="btn wide" data-act="dxf"><span>DXF-zaagbestand</span><span>genummerd · boorgaten</span></button>
+        <button class="btn wide" data-act="manual"><span>Montagehandleiding</span><span>PDF · stap voor stap</span></button>
+        <button class="btn wide" data-act="rhino"><span>3D-model voor Rhino</span><span>.3dm · lagen · namen</span></button>
         <div class="row">
           <button class="btn ghost small" data-act="json">Projectbestand (.json)</button>
           <button class="btn ghost small" data-act="open">Openen…</button>
@@ -338,6 +359,18 @@ function setPath(o, p, v) { const ks = p.split('.'); const last = ks.pop(); ks.r
 function applyField(field, raw, el) {
   const d = state.d;
   if (field === 'name') { commit(d => { d.name = raw.trim() || 'Naamloos'; }, { panel: false }); return; }
+  if (field === 'pt') {
+    const v = parseFloat(raw); if (!isFinite(v)) { renderPanel(); return; }
+    const i = +el.dataset.i, c = +el.dataset.c;
+    commit(d => { const p = d.shape.pts[i]; moveShapePoint(d, i, c === 0 ? v : p[0], c === 1 ? v : p[1]); });
+    return;
+  }
+  if (field === 'H' && d.shape.on) {
+    const v = parseFloat(raw); if (!isFinite(v)) return;
+    const f = clamp(v, 200, 3000) / d.H;
+    commit(d => { d.shape.pts = d.shape.pts.map(([x, y]) => [x, y * f]); });
+    return;
+  }
   if (field === 'colw') { const v = parseFloat(raw); if (isFinite(v)) commit(d => setColWidth(d, +el.dataset.i, v)); return; }
   if (field === 'shelfY') {
     const v = parseFloat(raw); const s = state.sel.shelf;
@@ -353,6 +386,7 @@ function applyField(field, raw, el) {
 const panel = $('#panel');
 panel.addEventListener('change', e => {
   const el = e.target;
+  if (el.dataset.grain) { const ty = el.dataset.grain; commit(d => { d.grain[ty] = el.checked; }); return; }
   if (el.type === 'range') return;
   const f = el.dataset.field;
   if (!f) return;
@@ -378,7 +412,8 @@ panel.addEventListener('input', e => {
   }
   if (el.type !== 'range') return;
   if (!rangeUndo) { pushUndo(); rangeUndo = true; }
-  setPath(state.d, el.dataset.field, +el.value);
+  if (el.dataset.field === 'H' && state.d.shape.on) { const f = +el.value / state.d.H; state.d.shape.pts = state.d.shape.pts.map(([x, y]) => [x, y * f]); }
+  else setPath(state.d, el.dataset.field, +el.value);
   normalize(state.d);
   const box = el.closest('.dim')?.querySelector('.num input'); if (box) box.value = el.value;
   refresh(false);
@@ -397,6 +432,11 @@ document.addEventListener('click', e => {
     case 'step': state.step = state.step === +b.dataset.n ? 0 : +b.dataset.n; onStep(); renderPanel(); break;
     case 'inc': { const f = b.dataset.field; const cur = f === 'shelfY' ? cellY(d, state.sel.shelf.col, state.sel.shelf.k).bot : getPath(d, f); applyField(f, cur + +b.dataset.step, panel.querySelector(`.num input[data-field="${f}"]`)); break; }
     case 'set': commit(d => setPath(d, b.dataset.field, +val)); break;
+    case 'shape': commit(d => setShapePreset(d, val)); if (val !== 'rect' && state.view.dim === '3d') { state.view.dim = '2d'; viewer.setView(state.view); renderViewbar(); renderFoot(); } viewer.fit(); break;
+    case 'addpt': commit(d => addShapePoint(d)); break;
+    case 'delpt': commit(d => { d.shape.pts.splice(+b.dataset.i, 1); }); break;
+    case 'rhino': export3dm(b); break;
+    case 'manual': exportManual(b); break;
     case 'mattab': state.matTab = val; renderPanel(); break;
     case 'mat': commit(d => { const m = d.material[b.dataset.path]; m.type = val; if (MATERIALS[val].paint && !m.color) m.color = '#8DA1B4'; }); break;
     case 'color': commit(d => { d.material[b.dataset.path].color = val; }); break;
@@ -433,7 +473,7 @@ document.addEventListener('click', e => {
     case 'redo': redo(); break;
     case 'new': if (confirm('Nieuw ontwerp beginnen? Het huidige ontwerp blijft opgeslagen.')) { store.autosave(d); loadDesign(defaultDesign(), true); } break;
     case 'save': store.autosave(d, true); toast('Ontwerp opgeslagen in deze browser'); if (state.step === 7) renderPanel(); break;
-    case 'view': state.view[b.dataset.key] = b.dataset.key === 'dims' ? !state.view.dims : val; viewer.setView(state.view); renderViewbar(); break;
+    case 'view': state.view[b.dataset.key] = b.dataset.key === 'dims' ? !state.view.dims : val; viewer.setView(state.view); if (b.dataset.key === 'dim') viewer.fit(); renderViewbar(); renderFoot(); break;
     case 'fit': viewer.fit(); break;
     case 'gowarn': state.step = 7; renderPanel(); break;
   }
@@ -503,7 +543,7 @@ function download(name, data, type) {
 
 function exportDxf() {
   const d = state.d;
-  const nest = nestParts(state.geo.parts, d.sheet);
+  const nest = nestParts(state.geo.parts, d.sheet, d);
   const unplaced = nest.flatMap(n => n.unplaced);
   download(`${slug(d.name)}-zaagplan.dxf`, buildDxf(nest, d.sheet, d.name), 'application/dxf');
   toast(unplaced.length ? `DXF gemaakt — ${unplaced.length} deel/delen passen niet op de plaat` : 'DXF-zaagbestand gedownload');
@@ -513,7 +553,7 @@ async function exportPdfAction(btn) {
   btn.disabled = true; const old = btn.innerHTML; btn.innerHTML = '<span>PDF maken…</span>';
   try {
     const { exportPdf } = await import('./pdf.js');
-    const nest = nestParts(state.geo.parts, state.d.sheet);
+    const nest = nestParts(state.geo.parts, state.d.sheet, state.d);
     const axo = viewer.snapshot({ w: 1500, h: 1100, mode: 'render', dim: '3d' });
     const blob = await exportPdf(state.d, state.geo, nest, { axo });
     download(`${slug(state.d.name)}-overzicht.pdf`, blob);
@@ -521,6 +561,28 @@ async function exportPdfAction(btn) {
   } catch (err) {
     console.error(err); toast('PDF maken mislukt: ' + err.message);
   } finally { btn.disabled = false; btn.innerHTML = old; }
+}
+
+async function export3dm(btn) {
+  btn.disabled = true;
+  try {
+    const { build3dm } = await import('./export3dm.js');
+    const bytes = await build3dm(state.d, state.geo, { extraMeshes: viewer.hardwareMeshes() });
+    download(`${slug(state.d.name)}.3dm`, new Blob([bytes], { type: 'application/octet-stream' }));
+    toast('3DM-bestand gedownload');
+  } catch (err) { console.error(err); toast('3DM maken mislukt: ' + err.message); }
+  finally { btn.disabled = false; }
+}
+
+async function exportManual(btn) {
+  btn.disabled = true; const old = btn.innerHTML; btn.innerHTML = '<span>Handleiding maken…</span>';
+  try {
+    const { buildManual } = await import('./manual.js');
+    const blob = await buildManual(state.d, state.geo, viewer, (msg) => { btn.innerHTML = `<span>${msg}</span>`; });
+    download(`${slug(state.d.name)}-montagehandleiding.pdf`, blob);
+    toast('Montagehandleiding gedownload');
+  } catch (err) { console.error(err); toast('Handleiding maken mislukt: ' + err.message); }
+  finally { btn.disabled = false; btn.innerHTML = old; }
 }
 
 $('#fileOpen').addEventListener('change', async e => {

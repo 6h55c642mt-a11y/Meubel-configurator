@@ -10,20 +10,8 @@
 
 const LAYERS = [
   ['PLAAT', 8], ['SNIJ', 7], ['BOOR_A_D8', 1], ['BOOR_B_D8', 6],
-  ['BOOR_A_D5', 5], ['BOOR_B_D5', 4], ['POT_A_D35', 30], ['POT_B_D35', 30], ['TEKST', 3],
+  ['BOOR_A_D5', 5], ['BOOR_B_D5', 4], ['BOOR_A_D6', 1], ['BOOR_B_D6', 6], ['POT_A_D35', 30], ['POT_B_D35', 30], ['TEKST', 3],
 ];
-
-// Lokale 2D-coördinaten (u langs nerf/lengte, v dwars), rechtshandig gezien vanaf +dikte-as.
-export function localHole(p, h) {
-  const { grainI, otherI, thinI } = p.size;
-  const b = p.box;
-  const u = h.p[grainI] - b[grainI * 2];
-  const cyclic = (grainI + 1) % 3 === otherI; // e_g × e_o = +e_t ?
-  let v = cyclic ? h.p[otherI] - b[otherI * 2] : b[otherI * 2 + 1] - h.p[otherI];
-  // de dikte-as bepaalt welke zijde zichtbaar is; dir +1 = zijde A
-  void thinI;
-  return { u, v };
-}
 
 class Dxf {
   constructor() { this.out = []; }
@@ -81,10 +69,9 @@ function drawPart(dx, q, ox, grain) {
   const p = q.p, L = p.size.L, B = p.size.B;
   const X = (u, v) => q.rot ? ox + q.x + (B - v) : ox + q.x + u;
   const Y = (u, v) => q.rot ? q.y + u : q.y + v;
-  const corners = [[0, 0], [L, 0], [L, B], [0, B]].map(([u, v]) => [X(u, v), Y(u, v)]);
-  dx.poly('SNIJ', corners);
+  dx.poly('SNIJ', p.outline.map(([u, v]) => [X(u, v), Y(u, v)]));
   for (const h of p.holes) {
-    const { u, v } = localHole(p, h);
+    const { u, v } = h;
     const side = h.dir > 0 ? 'A' : 'B';
     const layer = h.kind === 'pot' ? `POT_${side}_D35` : `BOOR_${side}_D${h.d}`;
     dx.circle(layer, X(u, v), Y(u, v), h.d / 2);
@@ -94,7 +81,7 @@ function drawPart(dx, q, ox, grain) {
   const short = Math.min(q.w, q.h);
   const th = Math.max(14, Math.min(60, short * 0.22));
   dx.text('TEKST', cx, cy + (rot ? 0 : th * 0.35), th, String(p.num), rot);
-  const sub = ascii(`${p.name} ${Math.round(L)}x${Math.round(B)}`);
+  const sub = ascii(`${p.name} ${Math.round(L)}x${Math.round(B)}${p.notes && p.notes.length ? ' - ' + p.notes.join(', ') : ''}`);
   const sh = Math.max(7, Math.min(18, short * 0.08));
   if (rot) dx.text('TEKST', cx + th * 0.9, cy, sh, sub, 90);
   else dx.text('TEKST', cx, cy - th * 0.75, sh, sub, 0);

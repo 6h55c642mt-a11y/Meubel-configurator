@@ -110,7 +110,7 @@ export class Viewer {
     const d = this.design;
     const w = this.el.clientWidth || 1, h = this.el.clientHeight || 1, asp = w / h;
     const pad = 380;
-    const bw = (d.W + pad * 2) * MM, bh = (d.H + pad * 1.6) * MM;
+    const bw = (d.W + pad * 2) * MM, bh = (d.H + pad * 2.4) * MM;
     let halfH = Math.max(bh / 2, bw / 2 / asp);
     this.ortho.left = -halfH * asp; this.ortho.right = halfH * asp; this.ortho.top = halfH; this.ortho.bottom = -halfH;
     this.ortho.updateProjectionMatrix();
@@ -199,28 +199,41 @@ export class Viewer {
       color: lines ? 0x1f1f1f : 0x2a2a2a, transparent: !lines, opacity: lines ? 1 : 0.28,
     }));
 
+    const ov = this.override;
     for (const p of geo.parts) {
+      if (ov && ov.visible && !ov.visible.has(p.num)) continue;
       const isAnim = p.meta && p.meta.anim;
       if (!showFronts && (p.group === 'front' || p.group === 'lade')) {
         if (p.group === 'front') continue;
         if (p.group === 'lade' && !p.name.startsWith('Binnenlade')) continue;
       }
       const b = p.box;
-      const size = [b[1] - b[0], b[3] - b[2], b[5] - b[4]];
-      const center = [(b[0] + b[1]) / 2, (b[2] + b[3]) / 2, (b[4] + b[5]) / 2];
-      const geom = panelGeometry(size, AXI[p.thin], AXI[p.grain], p.num);
-      const [face, edge] = this._partMats(p);
-      const mats = [0, 0, 1, 1, 2, 2].map(a => (a === AXI[p.thin] ? face : edge));
+      let geom, mats, center;
+      if (p.prism) {
+        geom = prismGeometry(p.prism);
+        center = [0, 0, 0];
+        const [face, edge] = this._partMats(p);
+        const pm = this._prismMats(p, face, edge);
+        mats = p.thin === 'z' ? [pm.face, pm.edge] : [pm.edge, pm.face];
+      } else {
+        const size = [b[1] - b[0], b[3] - b[2], b[5] - b[4]];
+        center = [(b[0] + b[1]) / 2, (b[2] + b[3]) / 2, (b[4] + b[5]) / 2];
+        geom = panelGeometry(size, AXI[p.thin], AXI[p.grain], p.num);
+        const [face, edge] = this._partMats(p);
+        mats = [0, 0, 1, 1, 2, 2].map(a => (a === AXI[p.thin] ? face : edge));
+      }
+      if (this.override) mats = this._overrideMat(p, mats);
       const mesh = new THREE.Mesh(geom, mats);
       mesh.castShadow = mode === 'render'; mesh.receiveShadow = mode === 'render';
       mesh.userData.part = p;
       if (edgesOn) {
-        const e = new THREE.LineSegments(new THREE.EdgesGeometry(geom), lineMat);
+        const e = new THREE.LineSegments(new THREE.EdgesGeometry(geom, 20), lineMat);
         mesh.add(e);
       }
       const parent = isAnim ? this._animGroup(p.meta.anim, p, dm) : this.root;
       const off = parent.userData.pivot || [0, 0, 0];
       mesh.position.set(center[0] - off[0], center[1] - off[1], center[2] - off[2]);
+      if (ov && ov.offset && ov.offset[p.num]) mesh.position.add(new THREE.Vector3(...ov.offset[p.num]));
       parent.add(mesh);
 
       if (p.meta?.drag === 'shelf' || p.meta?.drag === 'divider') this.picks.push(mesh);
@@ -228,16 +241,17 @@ export class Viewer {
     }
 
     // grepen
-    if (showFronts) for (const h of geo.handles) {
+    if (showFronts && (!ov || ov.handles)) for (const h of geo.handles) {
       const g = handleMesh(h, this._finishMat(design.handle.finish), mode === 'render');
       const parent = this.anims.get(h.animId)?.obj || this.root;
       const off = parent.userData.pivot || [0, 0, 0];
       g.position.set(h.x - off[0], h.y - off[1], h.z - off[2]);
+      if (this.override) g.traverse(c => { if (c.isMesh) c.material = this.override.hlHandles ? this._mat('ov:hl', () => new THREE.MeshBasicMaterial({ color: 0xf2c9a8, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })) : this._mat('ov:white', () => new THREE.MeshBasicMaterial({ color: 0xffffff, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })); });
       if (edgesOn) g.traverse(c => { if (c.isMesh) c.add(new THREE.LineSegments(new THREE.EdgesGeometry(c.geometry, 30), lineMat)); });
       parent.add(g);
     }
     // garderobestangen
-    for (const r of geo.rails) {
+    if (!ov || ov.rails) for (const r of geo.rails) {
       const m = new THREE.Mesh(new THREE.CylinderGeometry(12, 12, r.x1 - r.x0 - 4, 24), this._finishMat('rvs'));
       m.rotation.z = Math.PI / 2; m.position.set((r.x0 + r.x1) / 2, r.y, r.z); m.castShadow = mode === 'render';
       this.root.add(m);
@@ -245,16 +259,48 @@ export class Viewer {
 
     // klikvlakken voor vakken
     const pickMat = this._mat('pick', () => new THREE.MeshBasicMaterial({ visible: false }));
-    for (const c of geo.picks) {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(c.x1 - c.x0, c.y1 - c.y0), pickMat);
-      m.position.set((c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2, dm.zF - 0.5);
+    if (!this.override) for (const c of geo.picks) {
+      const m = new THREE.Mesh(cellGeometry(c), pickMat);
+      m.position.set(0, 0, dm.zF - 0.5);
       m.userData.cell = c; this.root.add(m); this.picks.push(m);
     }
 
-    this._selection(geo, dm, showFronts);
-    if (this.view.dims) this._labels(design, geo, dm, showFronts);
+    if (!this.override) this._selection(geo, dm, showFronts);
+    if (!this.override && this.view.shapeEdit && design.shape && design.shape.on) this._shapeHandles(design, dm, showFronts);
+    if (this.view.dims && !this.override) this._labels(design, geo, dm, showFronts);
     this._applyAnim();
     if (this.firstFit) { this.firstFit = false; this.fit(); }
+  }
+
+  _prismMats(p, face, edge) {
+    if (this.view.mode !== 'render' || !face.map) return { face, edge: this.view.mode === 'render' ? face : edge };
+    const key = `pr:${face.uuid}`;
+    const f2 = this._mat(key, () => { const m = face.clone(); m.map = face.map.clone(); m.map.repeat.set(1 / 900, 1 / 900); m.map.needsUpdate = true; return m; });
+    return { face: f2, edge: f2 };
+  }
+
+  _overrideMat(p, mats) {
+    const ov = this.override;
+    const hl = ov.highlight && ov.highlight.has(p.num);
+    const m = hl ? this._mat('ov:hl', () => new THREE.MeshBasicMaterial({ color: 0xf2c9a8, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }))
+      : this._mat('ov:white', () => new THREE.MeshBasicMaterial({ color: 0xffffff, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
+    return Array.isArray(mats) ? mats.map(() => m) : m;
+  }
+
+  _shapeHandles(d, dm, showFronts) {
+    const z = (showFronts && this.view.fronts === 'dicht' ? dm.zF + dm.tf : dm.zF) + 8;
+    const pts = d.shape.pts;
+    const lm = this._mat('shapeLine', () => new THREE.LineBasicMaterial({ color: ACCENT }));
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts.map(([x, y]) => new THREE.Vector3(x, y, z))), lm);
+    this.root.add(line);
+    const hm = this._mat('shapeH', () => new THREE.MeshBasicMaterial({ color: ACCENT, depthTest: false }));
+    const geo = new THREE.CircleGeometry(16, 24);
+    pts.forEach(([x, y], i) => {
+      const m = new THREE.Mesh(geo, hm); m.position.set(x, y, z); m.renderOrder = 10;
+      m.userData.shapePt = i; this.root.add(m); this.picks.unshift(m);
+      const ring = new THREE.Mesh(new THREE.RingGeometry(16, 22, 24), this._mat('shapeR', () => new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false })));
+      ring.position.copy(m.position); ring.renderOrder = 9; this.root.add(ring);
+    });
   }
 
   _animGroup(anim, p, dm) {
@@ -294,8 +340,8 @@ export class Viewer {
     for (const s of this.sel.cells || []) {
       const c = geo.picks.find(q => q.col === s.col && q.k === s.k);
       if (!c) continue;
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(c.x1 - c.x0, c.y1 - c.y0), mat);
-      m.position.set((c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2, z); m.renderOrder = 5;
+      const m = new THREE.Mesh(cellGeometry(c), mat);
+      m.position.set(0, 0, z); m.renderOrder = 5;
       this.root.add(m);
       const fr = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), this._mat('selL', () => new THREE.LineBasicMaterial({ color: ACCENT })));
       fr.position.copy(m.position); this.root.add(fr);
@@ -389,7 +435,11 @@ export class Viewer {
       const h = hit(e);
       down = { x: e.clientX, y: e.clientY, h, dragging: false };
       const p = h?.object.userData.part;
-      if (p && (p.meta?.drag === 'shelf' || p.meta?.drag === 'divider')) {
+      if (h && h.object.userData.shapePt !== undefined) {
+        down.drag = { drag: 'shape', i: h.object.userData.shapePt };
+        this.controls.enabled = false; this.controlsO.enabled = false;
+        dom.setPointerCapture(e.pointerId);
+      } else if (p && (p.meta?.drag === 'shelf' || p.meta?.drag === 'divider')) {
         down.drag = p.meta;
         this.controls.enabled = false; this.controlsO.enabled = false;
         dom.setPointerCapture(e.pointerId);
@@ -402,14 +452,15 @@ export class Viewer {
         down.dragging = true;
         const ph = planeHit(e); if (!ph) return;
         const t = this.design.t;
-        if (down.drag.drag === 'shelf') this.cb.onMoveShelf(down.drag.col, down.drag.k, ph.y + t / 2, false);
+        if (down.drag.drag === 'shape') this.cb.onMoveShapePoint(down.drag.i, ph.x, ph.y);
+        else if (down.drag.drag === 'shelf') this.cb.onMoveShelf(down.drag.col, down.drag.k, ph.y + t / 2, false);
         else this.cb.onMoveDivider(down.drag.i, ph.x - t / 2, false);
         return;
       }
       if (down) return;
       const h = hit(e);
       const p = h?.object.userData.part;
-      dom.style.cursor = p?.meta?.drag === 'shelf' ? 'ns-resize' : p?.meta?.drag === 'divider' ? 'ew-resize' : (h ? 'pointer' : 'grab');
+      dom.style.cursor = h?.object.userData.shapePt !== undefined ? 'move' : p?.meta?.drag === 'shelf' ? 'ns-resize' : p?.meta?.drag === 'divider' ? 'ew-resize' : (h ? 'pointer' : 'grab');
     });
     dom.addEventListener('pointerup', e => {
       if (!down) return;
@@ -419,6 +470,7 @@ export class Viewer {
         this.controls.enabled = this.view.dim === '3d'; this.controlsO.enabled = this.view.dim === '2d';
         if (down.dragging) this.cb.onDragEnd();
         else if (down.drag.drag === 'shelf') this.cb.onSelectShelf(down.drag.col, down.drag.k);
+        else if (down.drag.drag === 'shape') this.cb.onSelectShapePoint?.(down.drag.i);
       } else if (!moved) {
         const o = down.h?.object;
         if (o?.userData.cell) this.cb.onSelectCell(o.userData.cell.col, o.userData.cell.k, add);
@@ -429,39 +481,90 @@ export class Viewer {
     });
   }
 
-  // ---------- snapshot voor PDF ----------
-  snapshot({ w = 1600, h = 1100, mode = 'render', dim = '3d', fronts = 'dicht', dims = false } = {}) {
+  // grepen en stangen als driehoeksnetten in mm (voor CAD-export)
+  hardwareMeshes() {
+    const out = [];
+    const push = (obj, name) => {
+      obj.updateMatrixWorld(true);
+      obj.traverse(c => {
+        if (!c.isMesh) return;
+        const g = c.geometry.clone().applyMatrix4(c.matrixWorld);
+        const ng = g.index ? g : g.toNonIndexed();
+        const pos = Array.from(ng.attributes.position.array);
+        const index = ng.index ? Array.from(ng.index.array) : Array.from({ length: pos.length / 3 }, (_, i) => i);
+        out.push({ name, positions: pos, index });
+      });
+    };
+    for (const h of this.geo.handles) {
+      const g = handleMesh(h, new THREE.MeshBasicMaterial(), false);
+      g.position.set(h.x, h.y, h.z); push(g, `Greep ${h.type}`);
+    }
+    for (const r of this.geo.rails) {
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(12, 12, r.x1 - r.x0 - 4, 24));
+      m.rotation.z = Math.PI / 2; m.position.set((r.x0 + r.x1) / 2, r.y, r.z); push(m, 'Garderobestang');
+    }
+    return out;
+  }
+
+  // ---------- offscreen beelden voor PDF ----------
+  snapshot({ w = 1600, h = 1100, mode = 'render', dim = '3d', fronts = 'dicht' } = {}) {
+    return this.renderImage({ w, h, mode, dim, fronts }).url;
+  }
+
+  // override: { visible:Set, highlight:Set, offset:{num:[x,y,z]}, handles, rails, hlHandles }
+  // cam: { dir:[x,y,z], box:[x0,x1,y0,y1,z0,z1] (mm), pad }
+  renderImage({ w = 1600, h = 1100, mode = 'render', dim = '3d', fronts = 'dicht', override = null, cam = {}, project = [], openAmt = null } = {}) {
     const keep = { ...this.view }, keepOpen = this.openAmt, keepSel = this.sel;
     const keepSize = new THREE.Vector2(); this.renderer.getSize(keepSize);
     const keepPR = this.renderer.getPixelRatio();
-    this.view = { ...this.view, mode, dim, fronts, dims };
-    this.openAmt = fronts === 'open' ? 1 : 0;
+    const keepFloor = [this.floor.visible, this.wall.visible];
+    this.view = { ...this.view, mode: override ? 'lines' : mode, dim, fronts, dims: false };
+    this.override = override;
+    this.openAmt = openAmt ?? (fronts === 'open' ? 1 : 0);
     this.update(this.design, this.geo, { cells: [] });
+    if (override) { this.floor.visible = this.wall.visible = false; }
     this.renderer.setPixelRatio(1);
     this.renderer.setSize(w, h, false);
-    let cam;
+    this.labelR.domElement.style.display = 'none';
     const d = this.design;
-    if (dim === '3d') {
-      cam = new THREE.PerspectiveCamera(30, w / h, 0.05, 100);
-      const target = new THREE.Vector3(0, d.H * MM / 2, d.D * MM / 2);
-      const size = Math.max(d.W * MM, d.H * MM * (w / h));
-      const dist = size / (2 * Math.tan(THREE.MathUtils.degToRad(15))) * 1.05 / (w / h) + d.D * MM;
-      cam.position.copy(target).addScaledVector(new THREE.Vector3(0.62, 0.36, 1).normalize(), Math.max(dist, 1.4));
-      cam.lookAt(target);
-    } else {
-      const pad = 120 * MM;
-      const halfW = d.W * MM / 2 + pad, halfH = d.H * MM / 2 + pad, asp = w / h;
-      const hh = Math.max(halfH, halfW / asp);
-      cam = new THREE.OrthographicCamera(-hh * asp, hh * asp, hh, -hh, 0.01, 100);
-      cam.position.set(0, d.H * MM / 2, 20); cam.lookAt(0, d.H * MM / 2, 0);
+    const off = new THREE.Vector3(-d.W / 2 * MM, 0, 0);
+    // te tonen kader (mm)
+    let box = cam.box;
+    if (!box) {
+      const bb = new THREE.Box3().setFromObject(this.root);
+      box = [bb.min.x / MM + d.W / 2, bb.max.x / MM + d.W / 2, bb.min.y / MM, bb.max.y / MM, bb.min.z / MM, bb.max.z / MM];
     }
-    this.renderer.render(this.scene, cam);
+    const c = new THREE.Vector3((box[0] + box[1]) / 2 * MM, (box[2] + box[3]) / 2 * MM, (box[4] + box[5]) / 2 * MM).add(off);
+    const radius = Math.hypot(box[1] - box[0], box[3] - box[2], box[5] - box[4]) / 2 * MM * (cam.pad ?? 0.86);
+    let camera;
+    if (dim === '3d') {
+      const fov = cam.fov ?? 26;
+      camera = new THREE.PerspectiveCamera(fov, w / h, 0.01, 100);
+      const fit = radius / Math.sin(THREE.MathUtils.degToRad(fov / 2)) / Math.min(1, w / h);
+      const dir = new THREE.Vector3(...(cam.dir || [0.62, 0.36, 1])).normalize();
+      camera.position.copy(c).addScaledVector(dir, fit);
+      camera.lookAt(c);
+    } else {
+      const asp = w / h;
+      const halfW = (box[1] - box[0]) / 2 * MM * (cam.pad ?? 1.1), halfH = (box[3] - box[2]) / 2 * MM * (cam.pad ?? 1.1);
+      const hh = Math.max(halfH, halfW / asp);
+      camera = new THREE.OrthographicCamera(-hh * asp, hh * asp, hh, -hh, 0.01, 100);
+      camera.position.set(c.x, c.y, 20); camera.lookAt(c.x, c.y, 0);
+    }
+    camera.updateMatrixWorld();
+    this.renderer.render(this.scene, camera);
     const url = this.renderer.domElement.toDataURL('image/png');
-    this.view = keep; this.openAmt = keepOpen;
+    const pts = project.map(([x, y, z]) => {
+      const v = new THREE.Vector3(x * MM, y * MM, z * MM).add(off).project(camera);
+      return [(v.x + 1) / 2 * w, (1 - v.y) / 2 * h];
+    });
+    this.view = keep; this.openAmt = keepOpen; this.override = null;
+    this.floor.visible = keepFloor[0]; this.wall.visible = keepFloor[1];
+    this.labelR.domElement.style.display = '';
     this.renderer.setPixelRatio(keepPR);
     this.renderer.setSize(keepSize.x, keepSize.y);
     this.update(this.design, this.geo, keepSel);
-    return url;
+    return { url, pts, w, h };
   }
 }
 
@@ -512,3 +615,19 @@ function handleMesh(h, mat, shadows) {
   }
   return g;
 }
+
+function prismGeometry(pr) {
+  const shape = new THREE.Shape(pr.poly.map(([x, y]) => new THREE.Vector2(x, y)));
+  const g = new THREE.ExtrudeGeometry(shape, { depth: pr.z1 - pr.z0, bevelEnabled: false });
+  g.translate(0, 0, pr.z0);
+  return g;
+}
+
+function cellGeometry(c) {
+  if (c.poly) return new THREE.ShapeGeometry(new THREE.Shape(c.poly.map(([x, y]) => new THREE.Vector2(x, y))));
+  const g = new THREE.PlaneGeometry(c.x1 - c.x0, c.y1 - c.y0);
+  g.translate((c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2, 0);
+  return g;
+}
+
+export { handleMesh, panelGeometry, prismGeometry };

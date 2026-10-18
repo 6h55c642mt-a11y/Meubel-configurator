@@ -1,5 +1,5 @@
 // Plaatoptimalisatie met MaxRects (best short side fit).
-import { MATERIALS, matLabel } from './model.js';
+import { MATERIALS, matLabel, grainOn } from './model.js';
 
 class MaxRects {
   constructor(w, h) { this.w = w; this.h = h; this.free = [{ x: 0, y: 0, w, h }]; }
@@ -36,7 +36,7 @@ class MaxRects {
 
 export function groupKey(p) { return `${p.mat.type}|${p.t}`; }
 
-export function nestParts(parts, sheet) {
+export function nestParts(parts, sheet, d) {
   const { L, W, kerf, margin } = sheet;
   const uw = L - 2 * margin, uh = W - 2 * margin;
   const groups = new Map();
@@ -44,7 +44,7 @@ export function nestParts(parts, sheet) {
     const k = groupKey(p);
     if (!groups.has(k)) {
       const info = MATERIALS[p.mat.type] || MATERIALS.berken;
-      groups.set(k, { key: k, label: info.paint ? `${info.label} ${p.t} mm` : matLabel(p.mat, p.t), grain: info.grain, parts: [] });
+      groups.set(k, { key: k, type: p.mat.type, label: info.paint ? `${info.label} ${p.t} mm` : matLabel(p.mat, p.t), grain: d ? grainOn(d, p.mat.type) : info.grain, parts: [] });
     }
     groups.get(k).parts.push(p);
   }
