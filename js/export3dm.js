@@ -82,5 +82,6 @@ export async function build3dm(d, geo, { extraMeshes = null } = {}) {
     }
   }
   doc.strings().set('Project', d.name);
-  return doc.toByteArray();
+  const wo = new rh.File3dmWriteOptions(); wo.version = 7; // opent in Rhino 7 en 8
+  return doc.toByteArrayOptions(wo);
 }

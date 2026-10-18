@@ -10,7 +10,7 @@
 
 const LAYERS = [
   ['PLAAT', 8], ['SNIJ', 7], ['BOOR_A_D8', 1], ['BOOR_B_D8', 6],
-  ['BOOR_A_D5', 5], ['BOOR_B_D5', 4], ['BOOR_A_D6', 1], ['BOOR_B_D6', 6], ['POT_A_D35', 30], ['POT_B_D35', 30], ['TEKST', 3],
+  ['BOOR_A_D5', 5], ['BOOR_B_D5', 4], ['BOOR_A_D6', 1], ['BOOR_B_D6', 6], ['POT_A_D35', 30], ['POT_B_D35', 30], ['BOOR_A_D7_DOOR', 1], ['BOOR_B_D7_DOOR', 6], ['CAB_PILOT_A_D5', 140], ['CAB_PILOT_B_D5', 140], ['CABINEO_A', 150], ['CABINEO_B', 150], ['AFSCHUINING', 2], ['TEKST', 3],
 ];
 
 class Dxf {
@@ -73,8 +73,20 @@ function drawPart(dx, q, ox, grain) {
   for (const h of p.holes) {
     const { u, v } = h;
     const side = h.dir > 0 ? 'A' : 'B';
-    const layer = h.kind === 'pot' ? `POT_${side}_D35` : `BOOR_${side}_D${h.d}`;
+    const layer = h.kind === 'pot' ? `POT_${side}_D35`
+      : h.kind === 'confirmat' ? `BOOR_${side}_D7_DOOR`
+      : h.kind === 'cab-pilot' ? `CAB_PILOT_${side}_D5`
+      : h.kind === 'cabineo' ? `CABINEO_${side}`
+      : `BOOR_${side}_D${h.d}`;
     dx.circle(layer, X(u, v), Y(u, v), h.d / 2);
+  }
+  // schuine kopse kanten
+  for (const b of p.bevels || []) {
+    const u = b.end === 'u0' ? 0 : L;
+    dx.line('AFSCHUINING', X(u, 0), Y(u, 0), X(u, B), Y(u, B));
+    const ui = b.end === 'u0' ? 30 : L - 30;
+    const rotT = q.rot ? 0 : 90;
+    dx.text('AFSCHUINING', X(ui, B / 2), Y(ui, B / 2), 12, ascii(`schuin ${String(b.angle).replace('.', ',')} gr - lang zijde ${b.longA ? 'A' : 'B'}`), rotT);
   }
   const cx = ox + q.x + q.w / 2, cy = q.y + q.h / 2;
   const rot = q.h > q.w * 1.6 ? 90 : 0;

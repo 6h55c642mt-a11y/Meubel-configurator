@@ -35,17 +35,17 @@ export async function buildManual(d, geo, viewer, progress = () => {}) {
   // ---------- deuvels per stap: koppel elk gat aan het tegenstuk ----------
   const joints = [];
   for (const p of parts) for (const h of p.holes) {
-    if (h.kind !== 'deuvel') continue;
+    if (!['deuvel', 'confirmat', 'cab-pilot'].includes(h.kind)) continue;
     const n = p.frame.n, q = h.p.map((v, i) => v + n[i] * h.dir * 2);
     const mate = parts.find(o => o !== p && [0, 1, 2].every(i => q[i] > o.box[i * 2] + 0.01 && q[i] < o.box[i * 2 + 1] - 0.01));
-    if (mate) joints.push({ a: p.num, b: mate.num, d: h.d });
+    if (mate) joints.push({ a: p.num, b: mate.num, d: h.d, kind: h.kind });
   }
   const counted = new Set();
   const dowelsFor = (present, added) => {
     let c8 = 0, c6 = 0;
     joints.forEach((j, i) => {
       if (counted.has(i)) return;
-      if (present.has(j.a) && present.has(j.b) && (added.has(j.a) || added.has(j.b))) { counted.add(i); j.d === 6 ? c6++ : c8++; }
+      if (present.has(j.a) && present.has(j.b) && (added.has(j.a) || added.has(j.b))) { counted.add(i); j.d === 6 && j.kind === 'deuvel' ? c6++ : c8++; }
     });
     return { c8, c6 };
   };
@@ -59,33 +59,42 @@ export async function buildManual(d, geo, viewer, progress = () => {}) {
     add.forEach(n => present.add(n));
     const dw = opts.noDowels ? { c8: 0, c6: 0 } : dowelsFor(present, add);
     const hw = [...(opts.hw || [])];
-    if (dw.c8) hw.unshift({ name: 'Deuvel Ø8×35', qty: dw.c8, icon: 'deuvel' });
+    if (dw.c8) hw.unshift({ name: JL.name, qty: dw.c8, icon: JL.icon });
     if (dw.c6) hw.unshift({ name: 'Deuvel Ø6×30', qty: dw.c6, icon: 'deuvel' });
     steps.push({ title, add, visible: new Set(present), hw, text: opts.text || [], detail: opts.detail, cam: opts.cam, openAmt: opts.openAmt ?? 0, handles: !!opts.handles, rails: !!opts.rails, hlHandles: !!opts.hlHandles, mode: opts.mode });
   };
 
-  const multi = geo.modules.length > 1;
-  const per = multi ? ' Herhaal voor elke module.' : '';
+  const JS = geo.joinery || 'deuvel';
+  const JL = {
+    deuvel: { name: 'Deuvel Ø8×35', icon: 'deuvel', fix: 'Doe een beetje lijm in de gaten en sla de deuvels erin.', join: 'Lijm de deuvels en druk de delen op elkaar.' },
+    confirmat: { name: 'Confirmat 7×50', icon: 'schroef', fix: 'Boor de kopse kanten voor met Ø5 door het gat in de zijwand.', join: 'Schroef de Confirmats vast met een inbusbit; niet te hard aandraaien.' },
+    cabineo: { name: 'Lamello Cabineo 8', icon: 'verbinder', fix: 'Druk de Cabineo-verbinders in de gefreesde zakken.', join: 'Zet de delen tegen elkaar en draai de Cabineo-schroeven vast met de T20-bit.' },
+  }[JS];
+  const det = JS === 'deuvel' ? 'deuvel' : JS === 'confirmat' ? 'confirmat' : 'cabineo';
   step('Zijwand en plint', [...leftSides, ...nums(is.plinth)], {
-    text: [`Leg de linker zijwand plat op een schone, zachte ondergrond met de gaten naar boven.${per}`, 'Doe een beetje lijm in de gaten, sla de deuvels erin en plaats de plintdelen.'],
-    detail: 'deuvel',
+    text: ['Leg de linker zijwand plat op een schone, zachte ondergrond met de gaten naar boven.', JL.fix, 'Plaats de plintdelen.' + (geo.seams?.length ? ' Lijm de verbindingslat achter de plintnaad.' : '')],
+    detail: det,
   });
-  step('Bodem', nums(is.bottom), { text: ['Lijm de deuvels en plaats de bodem op de plint, tegen de zijwand.', 'Veeg uitgeperste lijm direct weg met een vochtige doek.'], detail: 'deuvel' });
-  step('Tussenschotten', nums(is.divider), { text: ['Zet de tussenschotten met deuvels op de bodem.', 'Controleer met een winkelhaak of ze haaks staan.'], detail: 'haaks' });
-  step('Vaste legplanken', nums(is.shelf), { text: ['Plaats de vaste legplanken tussen de zijwand en de schotten.', 'Werk van onder naar boven.'], detail: 'deuvel' });
-  step('Zijwand rechts', rightSides, { text: ['Lijm de deuvels en druk de rechter zijwand op alle planken en de bodem.', 'Gebruik lijmklemmen en laat ze zitten tot de lijm droog is.'], detail: 'klem' });
+  step('Bodem', nums(is.bottom), {
+    text: [JL.join + ' Plaats de bodem op de plint, tegen de zijwand.', ...(geo.seams?.length ? ['De bodem bestaat uit meerdere delen: koppel de naad met de naadverbinders voordat je verder gaat.'] : []), ...(JS === 'deuvel' ? ['Veeg uitgeperste lijm direct weg met een vochtige doek.'] : [])],
+    detail: geo.seams?.length ? 'naad' : det,
+    hw: geo.seams?.length ? geo.hardware.filter(h => /Clamex|Werkbladverbinder/.test(h.name)).map(h => ({ name: h.name.replace(/ \(.*\)/, ''), qty: Math.ceil(h.qty / 2), icon: 'verbinder' })) : [],
+  });
+  step('Tussenschotten', nums(is.divider), { text: ['Zet de tussenschotten op de bodem. ' + JL.join, 'Controleer met een winkelhaak of ze haaks staan.'], detail: 'haaks' });
+  step('Vaste legplanken', nums(is.shelf), { text: ['Plaats de vaste legplanken tussen de zijwand en de schotten.', 'Werk van onder naar boven.'], detail: det });
+  step('Zijwand rechts', rightSides, { text: ['Druk de rechter zijwand op alle planken en de bodem. ' + JL.join, ...(JS === 'deuvel' ? ['Gebruik lijmklemmen en laat ze zitten tot de lijm droog is.'] : [])], detail: JS === 'deuvel' ? 'klem' : det });
   step('Bovenblad', nums(is.top), {
-    text: ['Plaats het bovenblad op de zijwanden en schotten.', ...(geo.dims.shaped ? ['Schuine bladen: zet de verstekken eerst droog tegen elkaar en lijm dan in één keer.'] : []), 'Klem vast en laat minstens een uur drogen.'],
-    detail: 'deuvel',
+    text: ['Plaats het bovenblad op de zijwanden en schotten. ' + JL.join,
+      ...(geo.dims.shaped ? ['Schuine bladen: zet de verstekken eerst droog tegen elkaar. De zaaghoeken staan in de zaaglijst.'] : []),
+      ...(geo.seams?.length ? ['Koppel de naad tussen de bladdelen met de naadverbinders.'] : []),
+      ...(JS === 'deuvel' ? ['Klem vast en laat minstens een uur drogen.'] : [])],
+    detail: geo.dims.shaped ? 'verstek' : geo.seams?.length ? 'naad' : det,
+    hw: geo.seams?.length ? geo.hardware.filter(h => /Clamex|Werkbladverbinder/.test(h.name)).map(h => ({ name: h.name.replace(/ \(.*\)/, ''), qty: Math.floor(h.qty / 2), icon: 'verbinder' })) : [],
   });
   step('Achterwand', nums(is.back), {
     text: ['Leg de kast op de voorkant.', 'Meet beide diagonalen: zijn ze gelijk, dan staat de kast haaks.', 'Schroef de achterwand vast, ongeveer elke 150 mm, ook op de schotten.'],
     hw: hwItems(/Schroef 3,5/).map(h => ({ name: 'Schroef 3,5×16', qty: h.qty, icon: 'schroef' })),
     detail: 'diagonaal', cam: { dir: [-0.55, 0.42, -1] }, noDowels: true,
-  });
-  if (multi) step('Modules koppelen', [], {
-    always: true, text: ['Zet de modules rechtop naast elkaar op hun plaats.', 'Klem de zijwanden tegen elkaar, voorkanten gelijk, en boor door voor de kastverbinders.'],
-    hw: hwItems(/Kastverbinder/).map(h => ({ name: 'Kastverbinder', qty: h.qty, icon: 'verbinder' })), detail: 'verbinder',
   });
   const drawerHW = hwItems(/Ladegeleider/).map(h => ({ name: h.name.replace('Ladegeleider volledig uittrekbaar', 'Geleider'), qty: h.qty, icon: 'geleider' }));
   if (parts.some(is.box) || parts.some(is.innerBox)) {
@@ -408,6 +417,30 @@ async function drawDetail(doc, det, cx, cy, r, d, geo, viewer) {
     lbl('12', x0 + (T - 6) * k, y0 + 33 * k, 'center');
     lbl('lijm', x0 + 22 * k, y0 + 42 * k);
     if (kind === 'klem') { doc.setLineWidth(0.8); doc.line(cx - r * 0.8, cy - r * 0.55, cx + r * 0.8, cy - r * 0.55); doc.setLineWidth(0.3); lbl('klemmen ± 1 uur', cx, cy - r * 0.62, 'center'); }
+  } else if (kind === 'confirmat') {
+    const k = s * 0.9, x0 = cx - 18 * k, y0 = cy - 18 * k;
+    doc.setFillColor(...PALE); doc.rect(x0, y0, T * k, 40 * k, 'FD'); doc.rect(x0 + T * k, y0 + 18 * k, 26 * k, T * k, 'FD');
+    doc.setFillColor(255, 255, 255); doc.rect(x0 - 3 * k, y0 + (18 + T / 2 - 3.5) * k, (T + 3 + 30) * k, 7 * k, 'FD');
+    doc.setFillColor(...INK); doc.rect(x0 - 3 * k, y0 + (18 + T / 2 - 4.5) * k, 3 * k, 9 * k, 'F');
+    lbl('7 × 50', x0 + 30 * k, y0 + 14 * k); lbl('Ø7 door · Ø5 voor', x0 + 22 * k, y0 + 42 * k);
+  } else if (kind === 'cabineo') {
+    const k = s * 0.9, x0 = cx - 18 * k, y0 = cy - 18 * k;
+    doc.setFillColor(...PALE); doc.rect(x0, y0, T * k, 40 * k, 'FD'); doc.rect(x0 + T * k, y0 + 18 * k, 26 * k, T * k, 'FD');
+    doc.setFillColor(255, 255, 255); doc.roundedRect(x0 + (T + 3) * k, y0 + (18 + T - 7) * k, 14 * k, 7 * k, 2 * k, 2 * k, 'FD');
+    doc.setLineWidth(0.6); doc.line(x0 + (T + 3) * k, y0 + (18 + T - 3.5) * k, x0 + (T - 9) * k, y0 + (18 + T - 3.5) * k); doc.setLineWidth(0.3);
+    lbl('Cabineo in zak', x0 + 22 * k, y0 + 44 * k); lbl('schroef in vlak', x0 - 2 * k, y0 + 14 * k);
+  } else if (kind === 'naad') {
+    const k = s;
+    doc.setFillColor(...PALE); doc.rect(cx - 26 * k, cy - 4 * k, 26 * k, T * k * 0.8, 'FD'); doc.rect(cx, cy - 4 * k, 26 * k, T * k * 0.8, 'FD');
+    doc.rect(cx - 9 * k * 2, cy + (T * 0.8 - 4) * k, 18 * k, 22 * k, 'FD');
+    doc.setFillColor(255, 255, 255); doc.roundedRect(cx - 7 * k, cy - 1 * k, 14 * k, 6 * k, 2 * k, 2 * k, 'FD');
+    lbl('naadverbinder', cx, cy - 7 * k, 'center'); lbl('schot', cx - 9 * k, cy + 22 * k, 'center');
+  } else if (kind === 'verstek') {
+    const k = s;
+    doc.setFillColor(...PALE);
+    doc.lines([[30 * k, 0], [0, 9 * k], [-27 * k, 0]], cx - 30 * k, cy - 6 * k, [1, 1], 'FD', true);
+    doc.lines([[24 * k, 14 * k], [-5 * k, 8 * k], [-22 * k, -13 * k]], cx, cy - 6 * k, [1, 1], 'FD', true);
+    lbl('zaaghoek = halve knik', cx, cy + 20 * k, 'center');
   } else if (kind === 'haaks') {
     doc.setFillColor(...PALE);
     doc.rect(cx - r * 0.55, cy + r * 0.25, r * 1.1, r * 0.12, 'FD');

@@ -337,14 +337,26 @@ export class Viewer {
   _selection(geo, dm, showFronts) {
     const mat = this._mat('sel', () => new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.32, depthWrite: false }));
     const z = (showFronts && this.view.fronts === 'dicht' ? dm.zF + dm.tf : dm.zF) + 1.5;
+    const frontsClosed = showFronts && this.view.fronts === 'dicht';
+    const done = new Set();
     for (const s of this.sel.cells || []) {
       const c = geo.picks.find(q => q.col === s.col && q.k === s.k);
       if (!c) continue;
-      const m = new THREE.Mesh(cellGeometry(c), mat);
-      m.position.set(0, 0, z); m.renderOrder = 5;
-      this.root.add(m);
-      const fr = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), this._mat('selL', () => new THREE.LineBasicMaterial({ color: ACCENT })));
-      fr.position.copy(m.position); this.root.add(fr);
+      // bij gesloten fronten: markeer de vorm van het front dat dit vak afdekt
+      let shapes = [c];
+      if (frontsClosed) {
+        const fr = geo.parts.filter(p => p.group === 'front' && p.meta.col === s.col && s.k >= p.meta.k0 && s.k <= p.meta.k1);
+        if (fr.length) {
+          shapes = fr.filter(p => !done.has(p.num)).map(p => { done.add(p.num); return p.prism ? { poly: p.prism.poly } : { x0: p.box[0], x1: p.box[1], y0: p.box[2], y1: p.box[3] }; });
+        }
+      }
+      for (const sh of shapes) {
+        const m = new THREE.Mesh(cellGeometry(sh), mat);
+        m.position.set(0, 0, z); m.renderOrder = 5;
+        this.root.add(m);
+        const fr = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), this._mat('selL', () => new THREE.LineBasicMaterial({ color: ACCENT })));
+        fr.position.copy(m.position); this.root.add(fr);
+      }
     }
     if (this.sel.shelf) {
       const p = geo.parts.find(q => q.meta?.drag === 'shelf' && q.meta.col === this.sel.shelf.col && q.meta.k === this.sel.shelf.k);

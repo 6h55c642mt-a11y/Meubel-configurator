@@ -2,8 +2,9 @@ import {
   defaultDesign, normalize, setColumnCount, setCellCount, equalizeColumns, equalizeCells,
   setColWidth, setCellHeight, moveShelfTo, moveDividerTo, frontOwner, cellY,
   MATERIALS, PALETTE, FRONT_TYPES, INTERIORS, HANDLE_TYPES, FINISHES, colorName, uid, clamp,
-  setShapePreset, addShapePoint, moveShapePoint, SHAPE_PRESETS, grainOn,
+  setShapePreset, addShapePoint, moveShapePoint, SHAPE_PRESETS, grainOn, JOINERY,
 } from './model.js';
+import { estimate, euro, SERVICES, defaultSheetPrice, defaultHwPrice } from './costs.js';
 import { buildGeometry } from './geometry.js';
 import { Viewer } from './viewer.js';
 import { nestParts } from './nesting.js';
@@ -168,6 +169,10 @@ const BODIES = {
           '<div class="hint">Kies een vorm om een schuine of geknikte bovenrand te maken, bijvoorbeeld onder een schuin dak of een trap. Daarna kun je de punten verslepen of in mm invullen.</div>'}
       </div>
       <div class="field"><label>Plaatdikte korpus en fronten</label>${seg('set', [[15, '15 mm'], [18, '18 mm'], [22, '22 mm'], [25, '25 mm']], d.t, 'data-field="t"')}</div>
+      <div class="field"><label>Verbindingen</label>
+        ${seg('joinery', Object.entries(JOINERY).map(([k, v]) => [k, v.label]), d.joinery)}
+        <div class="hint">${JOINERY[d.joinery].hint}</div>
+      </div>
       <div class="field"><label>Achterwand</label>
         <label class="toggle"><input type="checkbox" data-field="back" ${d.back ? 'checked' : ''}> Opgelegde achterwand</label>
         ${seg('set', [[6, '6'], [8, '8'], [9, '9'], [12, '12 mm']], d.thinT, 'data-field="thinT"')}
@@ -308,6 +313,7 @@ const BODIES = {
         <div class="stat"><b>${area.toFixed(2)} m²</b><span>netto plaatoppervlak</span></div>
         <div class="stat"><b>${fronts}</b><span>fronten</span></div>
       </div>
+      ${costHtml(d, g, nest)}
       <div class="field"><label>Zaagplaten</label>
         <ul class="list">${nest.map(n => `<li><span>${esc(n.label)}</span>
           <label class="toggle mini-t" title="Nerfrichting aanhouden: onderdelen niet draaien"><input type="checkbox" data-grain="${n.type}" ${grainOn(d, n.type) ? 'checked' : ''}>nerf</label>
@@ -340,6 +346,32 @@ const BODIES = {
       </div>`;
   },
 };
+
+function costHtml(d, g, nest) {
+  const e = estimate(d, g, nest);
+  const open = state.costOpen;
+  const row = (name, qty, unitInput, total) => `<li><span>${esc(name)}</span><span class="q">${qty}×</span>${unitInput}<span class="q tot">${euro(total)}</span></li>`;
+  const inp = (attr, val, def) => `<input class="price ${val !== def ? 'changed' : ''}" ${attr} value="${(+val).toFixed(2)}" inputmode="decimal" title="Richtprijs ${euro(def)}">`;
+  return `<div class="card cost">
+    <div class="row"><b>Kostenraming</b><span class="spacer"></span><b class="big">${euro(e.totals.all)}</b></div>
+    <div class="costsplit">
+      <span>Plaat <b>${euro(e.totals.sheets)}</b></span><span>Beslag <b>${euro(e.totals.hw)}</b></span><span>${SERVICES[e.serviceMode].label} <b>${euro(e.totals.service)}</b></span>
+    </div>
+    <div class="row"><span class="lbl">Montage</span><span class="spacer"></span><b>± ${Math.ceil(e.hours.total * 2) / 2} uur</b></div>
+    ${seg('svc', Object.entries(SERVICES).map(([k, v]) => [k, v.label]), e.serviceMode)}
+    <button class="btn ghost small" data-act="costopen">${open ? 'Details verbergen' : 'Details en prijzen aanpassen'}</button>
+    ${open ? `
+      <div class="lbl">Plaatmateriaal (per plaat)</div>
+      <ul class="list costlist">${e.sheets.map(r => row(r.label, r.qty, inp(`data-price-sheet="${r.key}"`, r.unit, defaultSheetPrice(d, ...r.key.split('|').map((v, i) => (i ? +v : v)))), r.total)).join('')}</ul>
+      <div class="lbl">Beslag (per stuk)</div>
+      <ul class="list costlist">${e.hw.map(r => row(r.name, r.qty, inp(`data-price-hw="${esc(r.name)}"`, r.unit, defaultHwPrice(r.name)), r.total)).join('')}</ul>
+      <div class="lbl">${SERVICES[e.serviceMode].label}</div>
+      <ul class="list costlist">${e.service.map(r => `<li><span>${esc(r.name)}</span><span class="q tot">${euro(r.total)}</span></li>`).join('') || '<li><span>Geen kosten</span></li>'}</ul>
+      <div class="lbl">Montage-uren (schatting)</div>
+      <ul class="list costlist">${e.hours.lines.map(l => `<li><span>${esc(l.name)}</span><span class="q">${l.h.toFixed(1)} u</span></li>`).join('')}</ul>
+      <div class="hint">Richtprijzen incl. btw, indicatief. Pas ze aan op je offerte; aangepaste prijzen worden met het ontwerp bewaard. Exclusief lakwerk/olie en transport. <button class="linkbtn" data-act="pricereset">Richtprijzen herstellen</button></div>` : ''}
+  </div>`;
+}
 
 function swatchBg(type, color) {
   const m = MATERIALS[type];
@@ -386,6 +418,15 @@ function applyField(field, raw, el) {
 const panel = $('#panel');
 panel.addEventListener('change', e => {
   const el = e.target;
+  if (el.dataset.priceSheet || el.dataset.priceHw) {
+    const v = parseFloat(el.value.replace(',', '.'));
+    if (!isFinite(v)) { renderPanel(); return; }
+    commit(d => {
+      if (el.dataset.priceSheet) { d.prices.sheet = d.prices.sheet || {}; d.prices.sheet[el.dataset.priceSheet] = v; }
+      else { d.prices.hw = d.prices.hw || {}; d.prices.hw[el.dataset.priceHw] = v; }
+    });
+    return;
+  }
   if (el.dataset.grain) { const ty = el.dataset.grain; commit(d => { d.grain[ty] = el.checked; }); return; }
   if (el.type === 'range') return;
   const f = el.dataset.field;
@@ -436,6 +477,10 @@ document.addEventListener('click', e => {
     case 'addpt': commit(d => addShapePoint(d)); break;
     case 'delpt': commit(d => { d.shape.pts.splice(+b.dataset.i, 1); }); break;
     case 'rhino': export3dm(b); break;
+    case 'joinery': commit(d => { d.joinery = val; }); break;
+    case 'svc': commit(d => { d.prices.service = { ...(d.prices.service || {}), mode: val }; }); break;
+    case 'costopen': state.costOpen = !state.costOpen; renderPanel(); break;
+    case 'pricereset': commit(d => { d.prices = { service: d.prices.service }; }); break;
     case 'manual': exportManual(b); break;
     case 'mattab': state.matTab = val; renderPanel(); break;
     case 'mat': commit(d => { const m = d.material[b.dataset.path]; m.type = val; if (MATERIALS[val].paint && !m.color) m.color = '#8DA1B4'; }); break;

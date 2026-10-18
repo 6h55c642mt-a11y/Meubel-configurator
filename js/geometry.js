@@ -2,7 +2,7 @@
 // Elk deel krijgt een lokaal assenstelsel (frame): u = lengte/nerf, v = breedte, n = dikte (zijde A).
 import {
   plinthH, backT, colX, cellY, matLabel, HANDLE_TYPES, FINISHES, SLIDE_LENGTHS,
-  segments, topOuter, topInner, innerPts, innerRange, modules, profile,
+  segments, topOuter, topInner, innerPts, innerRange, profile,
 } from './model.js';
 
 const AX = { x: 0, y: 1, z: 2 };
@@ -85,7 +85,6 @@ export function buildGeometry(d) {
   const fOut = x => topOuter(d, x, segs);
   const gIn = x => topInner(d, x, segs);
   const breaks = [...profile(d).map(p => p[0]), ...innerPts(d, segs).map(p => p[0])];
-  const mods = modules(d);
 
   const parts = [], handles = [], rails = [], picks = [], warnings = [];
   const maxL = d.sheet.L - 2 * d.sheet.margin, maxB = d.sheet.W - 2 * d.sheet.margin;
@@ -105,7 +104,6 @@ export function buildGeometry(d) {
   const hole = (p, pos, dia, dir, kind) => p.holes.push({ p: pos, d: dia, dir, kind });
 
   const colRight = i => colX(d, i) + d.columns[i].w;
-  const modOf = ci => mods.find(m => ci >= m.c0 && ci <= m.c1);
 
   const shelfCenters = ci => {
     const col = d.columns[ci], out = [];
@@ -130,113 +128,168 @@ export function buildGeometry(d) {
   });
   const shelfTouches = (ci, k, x) => { const iv = shelfSpan[`${ci}:${k}`]; return iv && Math.abs(iv[0] - x) < 0.5 || iv && Math.abs(iv[1] - x) < 0.5; };
 
-  // ---------- per module het korpus ----------
-  mods.forEach((m, mi) => {
-    const lbl = mods.length > 1 ? ` (module ${mi + 1})` : '';
-    const mx0 = m.x0, mx1 = m.x1;
-    // zijwanden
-    for (const [side, xa] of [['links', mx0], ['rechts', mx1 - t]]) {
-      const hTop = Math.max(gIn(xa), gIn(xa + t));
-      const p = panel(`Zijwand ${side}${lbl}`, 'korpus', cm, t, [xa, xa + t, 0, hTop, zB, zF], 'x', 'y', { meta: { module: mi, role: 'side' } });
-      if (Math.abs(gIn(xa) - gIn(xa + t)) > 0.5) p.notes.push(`bovenkant afschuinen ${bevelDeg(segs, xa)}°`);
-      const xFace = side === 'links' ? xa + t : xa, dir = side === 'links' ? 1 : -1;
-      const ci = side === 'links' ? m.c0 : m.c1;
-      for (const z of zDowels) hole(p, [xFace, P + t / 2, z], 8, dir, 'deuvel');
-      for (const s of shelfCenters(ci)) if (!s.loose && shelfTouches(ci, s.k, xFace)) for (const z of zDowels) hole(p, [xFace, s.y, z], 8, dir, 'deuvel');
-      if (colHasLoose(ci)) for (const y of pinYs(xFace)) for (const z of pinRows) hole(p, [xFace, y, z], 5, dir, 'pin');
-      m[side] = p;
-    }
-    // bodem
-    const bottom = panel(`Bodem${lbl}`, 'korpus', cm, t, [mx0 + t, mx1 - t, P, P + t, zB, zF], 'y', 'x', { meta: { module: mi, role: 'bottom' } });
-    // tussenschotten binnen de module
-    const divCenters = [];
-    for (let i = m.c0; i < m.c1; i++) {
-      const xl = colRight(i);
-      const hTop = Math.max(gIn(xl), gIn(xl + t));
-      if (hTop < P + t + 60) { warnings.push(`Tussenschot ${i + 1} is te laag onder de bovenrand.`); continue; }
-      const dv = panel(`Tussenschot ${i + 1}`, 'korpus', cm, t, [xl, xl + t, P + t, hTop, zB, zF], 'x', 'y', { meta: { drag: 'divider', i, module: mi } });
-      if (Math.abs(gIn(xl) - gIn(xl + t)) > 0.5) dv.notes.push(`bovenkant afschuinen ${bevelDeg(segs, xl)}°`);
-      divCenters.push(xl + t / 2);
-      for (const [ci, xFace, dir] of [[i, xl, -1], [i + 1, xl + t, 1]]) {
-        for (const s of shelfCenters(ci)) if (!s.loose && shelfTouches(ci, s.k, xFace)) for (const z of zDowels) hole(dv, [xFace, s.y, z], 8, dir, 'deuvel');
-        if (colHasLoose(ci)) for (const y of pinYs(xFace)) for (const z of pinRows) hole(dv, [xFace, y, z], 5, dir, 'pin');
+  // ---------- verbindingen ----------
+  // A ontvangt in zijn vlak; B sluit er met zijn kopse kant op aan.
+  const JS = d.joinery || 'deuvel';
+  const jointCount = { deuvel: 0, confirmat: 0, cabineo: 0 };
+  const connect = (A, pA, dirA, outward, B, bFace) => {
+    if (JS === 'confirmat') hole(A, pA, 7, dirA, 'confirmat');
+    else if (JS === 'cabineo') {
+      hole(A, pA, 5, dirA, 'cab-pilot');
+      if (B && bFace) {
+        const q = pA.map((v, i) => v + outward[i] * 10);
+        q[bFace.axis] = bFace.value;
+        hole(B, q, 12, bFace.dir, 'cabineo');
       }
-      for (const z of zDowels) hole(bottom, [xl + t / 2, P + t, z], 8, 1, 'deuvel');
+    } else hole(A, pA, 8, dirA, 'deuvel');
+    jointCount[JS]++;
+  };
+  const zAlt = zDowels.map(z => (z < (zB + zF) / 2 ? z + 32 : z - 32));
+
+  // ---------- naden: bladen/bodem langer dan de plaat ----------
+  // naad tegen de rechterzijde van een tussenschot: het linkerdeel draagt het hele schot
+  const seamCands = d.columns.slice(0, -1).map((c, i) => colRight(i) + t);
+  const seams = [];
+  {
+    let cur = 0;
+    const pieces = Math.ceil(W / maxL);
+    while (W - cur > maxL) {
+      const target = (seams.length + 1) * W / pieces;
+      const cands = seamCands.filter(x => x > cur + 150 && x - cur <= maxL && W - x > 150);
+      if (!cands.length) { warnings.push(`De kast is breder dan de plaat (${maxL} mm): voeg een tussenschot toe binnen ${maxL} mm van de vorige naad.`); break; }
+      const c = cands.reduce((bb, x) => (Math.abs(x - target) < Math.abs(bb - target) ? x : bb), cands[0]);
+      seams.push(c); cur = c;
     }
-    // bovenblad(en): één per segment van de bovenrand binnen de module
-    const xsAll = [mx0, ...profile(d).map(p => p[0]).filter(x => x > mx0 + 1 && x < mx1 - 1), mx1];
-    const topHoleXs = [mx0 + t / 2, mx1 - t / 2, ...divCenters];
-    for (let i = 0; i < xsAll.length - 1; i++) {
-      const xa = xsAll[i], xb = xsAll[i + 1];
-      const sg = segs.find(s => (xa + xb) / 2 >= s.x0 - 1e-6 && (xa + xb) / 2 <= s.x1 + 1e-6);
-      const name = (xsAll.length > 2 ? `Bovenblad ${i + 1}` : 'Bovenblad') + lbl;
-      let p;
-      if (Math.abs(sg.k) < 1e-6) {
-        p = panel(name, 'korpus', cm, t, [xa, xb, sg.y0 - t, sg.y0, zB, zF], 'y', 'x', { meta: { module: mi, role: 'top' } });
-        for (const x of topHoleXs) if (x > xa && x < xb) for (const z of zDowels) hole(p, [x, sg.y0 - t, z], 8, -1, 'deuvel');
-      } else {
-        p = slopedPanel(name, sg, xa, xb, i === 0, i === xsAll.length - 2, mi);
-        for (const x of topHoleXs) if (x > xa && x < xb) for (const z of zDowels) hole(p, [x, gIn(x), z], 8, -1, 'deuvel');
+  }
+  const pieceName = (base, i, nPieces) => (nPieces > 1 ? `${base} ${String.fromCharCode(65 + i)}` : base);
+
+  // ---------- korpus ----------
+  const sideParts = {};
+  for (const [side, xa] of [['links', 0], ['rechts', W - t]]) {
+    const hTop = innerRange(d, xa, xa + t, segs).max;
+    const p = panel(`Zijwand ${side}`, 'korpus', cm, t, [xa, xa + t, 0, hTop, zB, zF], 'x', 'y', { meta: { role: 'side' } });
+    if (Math.abs(gIn(xa) - gIn(xa + t)) > 0.5) p.bevels = [{ end: 'u1', angle: bevelDeg(segs, xa), longA: gIn(xa + t) > gIn(xa) }];
+    sideParts[side] = p;
+  }
+  // bodem(en)
+  const bEdges = [t, ...seams, W - t];
+  const bottoms = [];
+  for (let i = 0; i < bEdges.length - 1; i++) {
+    bottoms.push(panel(pieceName('Bodem', i, bEdges.length - 1), 'korpus', cm, t, [bEdges[i], bEdges[i + 1], P, P + t, zB, zF], 'y', 'x', { meta: { role: 'bottom' } }));
+  }
+  const bottomAt = x => bottoms.find(b => x > b.box[0] && x < b.box[1]);
+  // zijwand ↔ bodem
+  for (const [side, xFace, dir] of [['links', t, 1], ['rechts', W - t, -1]]) {
+    const B = bottomAt(side === 'links' ? t + 1 : W - t - 1);
+    for (const z of zDowels) connect(sideParts[side], [xFace, P + t / 2, z], dir, [dir, 0, 0], B, { axis: 1, value: P, dir: -1 });
+  }
+  // zijwand ↔ vaste planken + gaatjesrij
+  for (const [side, xFace, dir, ci] of [['links', t, 1, 0], ['rechts', W - t, -1, n - 1]]) {
+    const sp = sideParts[side];
+    for (const s of shelfCenters(ci)) if (!s.loose && shelfTouches(ci, s.k, xFace)) for (const z of zDowels) connect(sp, [xFace, s.y, z], dir, [dir, 0, 0], null, null);
+    if (colHasLoose(ci)) for (const y of pinYs(xFace)) for (const z of pinRows) hole(sp, [xFace, y, z], 5, dir, 'pin');
+  }
+  // tussenschotten
+  const divCenters = [], dividers = [];
+  for (let i = 0; i < n - 1; i++) {
+    const xl = colRight(i);
+    const hTop = innerRange(d, xl, xl + t, segs).max;
+    if (hTop < P + t + 60) { warnings.push(`Tussenschot ${i + 1} is te laag onder de bovenrand.`); continue; }
+    const dv = panel(`Tussenschot ${i + 1}`, 'korpus', cm, t, [xl, xl + t, P + t, hTop, zB, zF], 'x', 'y', { meta: { drag: 'divider', i } });
+    if (Math.abs(gIn(xl) - gIn(xl + t)) > 0.5) dv.bevels = [{ end: 'u1', angle: bevelDeg(segs, xl), longA: gIn(xl + t) > gIn(xl) }];
+    divCenters.push(xl + t / 2); dividers.push(dv);
+    const leftYs = shelfCenters(i).filter(s => !s.loose && shelfTouches(i, s.k, xl)).map(s => s.y);
+    for (const [ci, xFace, dir] of [[i, xl, -1], [i + 1, xl + t, 1]]) {
+      for (const s of shelfCenters(ci)) if (!s.loose && shelfTouches(ci, s.k, xFace)) {
+        const clash = dir > 0 && leftYs.some(y => Math.abs(y - s.y) < 16);
+        for (const z of clash ? zAlt : zDowels) connect(dv, [xFace, s.y, z], dir, [dir, 0, 0], null, null);
       }
-      // verstek aan knikken
-      const kinks = [];
-      if (i > 0) kinks.push(xa); if (i < xsAll.length - 2) kinks.push(xb);
-      if (kinks.length) p.notes.push('verstek aan knik');
+      if (colHasLoose(ci)) for (const y of pinYs(xFace)) for (const z of pinRows) hole(dv, [xFace, y, z], 5, dir, 'pin');
     }
-    // plint
-    if (P > 0) {
-      const s = d.plinth.setback;
-      const pls = [panel(`Plint voor${lbl}`, 'plint', cm, t, [mx0 + t, mx1 - t, 0, P, zF - s - t, zF - s], 'z', 'x', { meta: { module: mi } })];
-      if (zF - s - t > zB + 2 * t + 40) pls.push(panel(`Plint achter${lbl}`, 'plint', cm, t, [mx0 + t, mx1 - t, 0, P, zB, zB + t], 'z', 'x', { meta: { module: mi } }));
-      else if (mi === 0) warnings.push('Plint-terugsprong is zo diep dat er geen achterplint past.');
-      const ys = P >= 90 ? [P / 3, 2 * P / 3] : [P / 2];
-      for (const pl of pls) {
-        const zc = (pl.box[4] + pl.box[5]) / 2;
-        for (const y of ys) { hole(m.links, [mx0 + t, y, zc], 8, 1, 'deuvel'); hole(m.rechts, [mx1 - t, y, zc], 8, -1, 'deuvel'); }
+    const B = bottomAt(xl + t / 2);
+    for (const z of zDowels) connect(B, [xl + t / 2, P + t, z], 1, [0, 1, 0], dv, { axis: 0, value: xl, dir: -1 });
+  }
+  // bovenblad(en): één per segment van de bovenrand, extra gesplitst op naden
+  const xsAll = [...new Set([0, W, ...profile(d).map(p => p[0]), ...seams].map(x => Math.round(x * 100) / 100))].sort((p, q) => p - q);
+  const vertical = [0, W, ...seams];
+  const topHoles = [
+    { x: t / 2, B: sideParts.links, bFace: { axis: 0, value: t, dir: 1 } },
+    { x: W - t / 2, B: sideParts.rechts, bFace: { axis: 0, value: W - t, dir: -1 } },
+    ...dividers.map(dv => ({ x: dv.box[0] + t / 2, B: dv, bFace: { axis: 0, value: dv.box[0], dir: -1 } })),
+  ];
+  const nTop = xsAll.length - 1;
+  for (let i = 0; i < nTop; i++) {
+    const xa = xsAll[i], xb = xsAll[i + 1];
+    const sg = segs.find(q => (xa + xb) / 2 >= q.x0 - 1e-6 && (xa + xb) / 2 <= q.x1 + 1e-6);
+    const name = nTop > 1 ? `Bovenblad ${i + 1}` : 'Bovenblad';
+    let p;
+    if (!shaped) {
+      p = panel(name, 'korpus', cm, t, [xa, xb, sg.y0 - t, sg.y0, zB, zF], 'y', 'x', { meta: { role: 'top' } });
+      for (const th of topHoles) if (th.x > xa && th.x < xb) for (const z of zDowels) connect(p, [th.x, sg.y0 - t, z], -1, [0, -1, 0], th.B, th.bFace);
+    } else {
+      p = slopedPanel(name, sg, xa, xb, vertical.some(v => Math.abs(v - xa) < 0.5), vertical.some(v => Math.abs(v - xb) < 0.5));
+      const Nn = p.frame.n;
+      for (const th of topHoles) if (th.x > xa && th.x < xb) for (const z of zDowels) connect(p, [th.x, gIn(th.x), z], -1, [-Nn[0], -Nn[1], 0], th.B, th.bFace);
+    }
+  }
+  // plint
+  if (P > 0) {
+    const s = d.plinth.setback;
+    const edges = [t, ...seams, W - t];
+    const rows = [['voor', zF - s - t, zF - s, -1]];
+    if (zF - s - t > zB + 2 * t + 40) rows.push(['achter', zB, zB + t, 1]);
+    else warnings.push('Plint-terugsprong is zo diep dat er geen achterplint past.');
+    const ys = P >= 90 ? [P / 3, 2 * P / 3] : [P / 2];
+    for (const [nm, z0, z1, inDir] of rows) {
+      for (let i = 0; i < edges.length - 1; i++) {
+        const pl = panel(pieceName(`Plint ${nm}`, i, edges.length - 1), 'plint', cm, t, [edges[i], edges[i + 1], 0, P, z0, z1], 'z', 'x', { meta: {} });
+        const zc = (z0 + z1) / 2, zFace = inDir < 0 ? z0 : z1;
+        if (i === 0) for (const y of ys) connect(sideParts.links, [t, y, zc], 1, [1, 0, 0], pl, { axis: 2, value: zFace, dir: inDir });
+        if (i === edges.length - 2) for (const y of ys) connect(sideParts.rechts, [W - t, y, zc], -1, [-1, 0, 0], pl, { axis: 2, value: zFace, dir: inDir });
       }
     }
-    // achterwand (zo nodig gesplitst op het hart van een tussenschot)
-    if (d.back) {
-      const fitsSheet = (w, h) => (w <= maxB && h <= maxL) || (w <= maxL && h <= maxB);
-      const hMax = clipUnder(mx0, mx1, P, H, fOut, breaks).maxY - P;
-      const cuts = [mx0];
-      if (!fitsSheet(mx1 - mx0, hMax)) {
-        let cur = mx0;
-        while (!fitsSheet(mx1 - cur, hMax)) {
-          const lim = hMax <= maxB ? maxL : maxB;
-          const c = divCenters.filter(x => x > cur + 100 && x - cur <= lim).pop();
-          if (c === undefined) { warnings.push(`Achterwand${lbl} past niet op de plaat; voeg een tussenschot toe.`); break; }
-          cuts.push(c); cur = c;
-        }
+  }
+  // naadverbinders
+  if (seams.length) {
+    const per = Math.max(2, Math.ceil(Ds / 220));
+    const nm = JS === 'cabineo' ? 'Lamello Clamex P-14 (naad bovenblad/bodem)' : 'Werkbladverbinder 150 mm + lamello (naad bovenblad/bodem)';
+    addHW(nm, seams.length * per * 2);
+    if (P > 0) addHW('Verbindingslat plint (achter de naad, gelijmd)', seams.length);
+    warnings.push(`Bovenblad en bodem hebben ${seams.length} naad${seams.length > 1 ? 'en' : ''} tegen een tussenschot (plaat max. ${maxL} mm).`);
+  }
+  // achterwand (zo nodig gesplitst op het hart van een tussenschot)
+  if (d.back) {
+    const fitsSheet = (w, h) => (w <= maxB && h <= maxL) || (w <= maxL && h <= maxB);
+    const hMax = clipUnder(0, W, P, H, fOut, breaks).maxY - P;
+    const cuts = [0];
+    if (!fitsSheet(W, hMax)) {
+      let cur = 0;
+      while (!fitsSheet(W - cur, hMax)) {
+        const lim = hMax <= maxB ? maxL : maxB;
+        const c = divCenters.filter(x => x > cur + 100 && x - cur <= lim).pop();
+        if (c === undefined) { warnings.push('Achterwand past niet op de plaat; voeg een tussenschot toe.'); break; }
+        cuts.push(c); cur = c;
       }
-      cuts.push(mx1);
-      for (let i = 0; i < cuts.length - 1; i++) {
-        const c = clipUnder(cuts[i], cuts[i + 1], P, H, fOut, breaks);
-        const nm = `Achterwand${cuts.length > 2 ? ' ' + String.fromCharCode(65 + i) : ''}${lbl}`;
-        const bp = panel(nm, 'achterwand', cm, bt, [cuts[i], cuts[i + 1], P, c.maxY, 0, bt], 'z', null, { meta: { module: mi } });
-        if (c.clipped) bp.prism = { poly: c.poly, z0: 0, z1: bt };
-      }
-      if (cuts.length > 2) warnings.push(`Achterwand${lbl} is in ${cuts.length - 1} delen gesplitst op het hart van een tussenschot.`);
-      addHW('Schroef 3,5×16 (achterwand)', Math.ceil((2 * (mx1 - mx0) + 2 * hMax + (m.c1 - m.c0 + cuts.length - 2) * hMax) / 150));
     }
-  });
-  if (mods.length > 1) {
-    for (let i = 0; i < mods.length - 1; i++) {
-      const h = Math.min(gIn(mods[i].x1), H) - P;
-      addHW('Kastverbinder (verbindingsschroef Ø5)', Math.max(4, 2 * Math.ceil(h / 450)));
+    cuts.push(W);
+    for (let i = 0; i < cuts.length - 1; i++) {
+      const c = clipUnder(cuts[i], cuts[i + 1], P, H, fOut, breaks);
+      const bp = panel(pieceName('Achterwand', i, cuts.length - 1), 'achterwand', cm, bt, [cuts[i], cuts[i + 1], P, c.maxY, 0, bt], 'z', null, { meta: {} });
+      if (c.clipped) bp.prism = { poly: c.poly, z0: 0, z1: bt };
     }
-    warnings.push(`De kast is opgedeeld in ${mods.length} modules van max. ${d.sheet.L - 2 * d.sheet.margin} mm, met kastverbinders gekoppeld.`);
+    if (cuts.length > 2) warnings.push(`Achterwand is in ${cuts.length - 1} delen gesplitst op het hart van een tussenschot.`);
+    addHW('Schroef 3,5×16 (achterwand)', Math.ceil((2 * W + 2 * hMax + (n - 1 + cuts.length - 2) * hMax) / 150));
   }
 
-  function slopedPanel(name, sg, xa, xb, firstInMod, lastInMod, mi) {
+  function slopedPanel(name, sg, xa, xb, cutA, cutB) {
     // binnenhoeken: snijpunt met buurlijnen of verticale snede op module/kastgrens
     const A = [xa, fOut(xa)], B = [xb, fOut(xb)];
     const Ai = [xa, gIn(xa)], Bi = [xb, gIn(xb)];
     // knik binnen kast: binnenhoek ligt op het verstekpunt
     const ip = innerPts(d, segs);
     const near = x => ip.find(p => Math.abs(p[0] - x) < Math.abs(sg.x1 - sg.x0)) ;
-    if (!firstInMod && xa > 0.5) { const q = ip.reduce((b, p) => Math.abs(p[0] - xa) < Math.abs(b[0] - xa) ? p : b); Ai[0] = q[0]; Ai[1] = q[1]; }
-    if (!lastInMod && xb < W - 0.5) { const q = ip.reduce((b, p) => Math.abs(p[0] - xb) < Math.abs(b[0] - xb) ? p : b); Bi[0] = q[0]; Bi[1] = q[1]; }
+    if (!cutA) { const q = ip.reduce((b, p) => Math.abs(p[0] - xa) < Math.abs(b[0] - xa) ? p : b); Ai[0] = q[0]; Ai[1] = q[1]; }
+    if (!cutB) { const q = ip.reduce((b, p) => Math.abs(p[0] - xb) < Math.abs(b[0] - xb) ? p : b); Bi[0] = q[0]; Bi[1] = q[1]; }
     void near;
     const len = Math.hypot(B[0] - A[0], B[1] - A[1]);
     const u = [(B[0] - A[0]) / len, (B[1] - A[1]) / len, 0];
@@ -248,12 +301,18 @@ export function buildGeometry(d) {
     const o = [A[0] + u[0] * umin - N[0] * t, A[1] + u[1] * umin - N[1] * t, zF];
     const ys = [A[1], B[1], Ai[1], Bi[1]], xs = [A[0], B[0], Ai[0], Bi[0]];
     const p = panel(name, 'korpus', cm, t, [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys), zB, zF], 'n', 'u', {
-      meta: { module: mi, role: 'top', sloped: true },
+      meta: { role: 'top', sloped: true },
       frame: { o, u, v: [0, 0, -1], n: N, L: umax - umin, B: Ds },
       prism: { poly: [Ai, Bi, B, A], z0: zB, z1: zF },
     });
     const ang = Math.round(Math.abs(Math.atan(sg.k)) * 180 / Math.PI * 10) / 10;
-    p.notes.push(`helling ${ang}°`);
+    if (ang > 0.05) p.notes.push(`helling ${String(ang).replace('.', ',')}°`);
+    // schuine kopse kanten: hoek t.o.v. haaks, en welke zijde langer is (A = buitenzijde)
+    const endAngle = (o, i) => { const dx = o[0] - i[0], dy = o[1] - i[1]; const c = Math.abs(dx * u[0] + dy * u[1]) / Math.hypot(dx, dy); return Math.round(Math.asin(Math.min(1, c)) * 180 / Math.PI * 10) / 10; };
+    p.bevels = [];
+    const a0 = endAngle(A, Ai), a1 = endAngle(B, Bi);
+    if (a0 > 0.2) p.bevels.push({ end: 'u0', angle: a0, longA: pr(A) < pr(Ai) });
+    if (a1 > 0.2) p.bevels.push({ end: 'u1', angle: a1, longA: pr(B) > pr(Bi) });
     return p;
   }
 
@@ -266,6 +325,12 @@ export function buildGeometry(d) {
       const box = loose ? [iv[0] + 1, iv[1] - 1, y - t, y, zB + 2, zF - 2] : [iv[0], iv[1], y - t, y, zB, zF];
       const p = panel(loose ? 'Legplank (los)' : 'Legplank', 'korpus', cm, t, box, 'y', 'x', { meta: { drag: 'shelf', col: ci, k, loose } });
       if (loose) addHW('Planksteun Ø5 mm', 4);
+      if (!loose && JS === 'cabineo') {
+        // zak aan de onderzijde van de plank, 10 mm van elke kopse kant, bij elke aansluiting
+        const yc = y - t / 2;
+        const zs = side => (side === 'l' && ci > 0 && shelfCenters(ci - 1).some(q => !q.loose && shelfTouches(ci - 1, q.k, colRight(ci - 1)) && Math.abs(q.y - yc) < 16) ? zAlt : zDowels);
+        for (const [x, sd] of [[iv[0] + 10, 'l'], [iv[1] - 10, 'r']]) for (const z of zs(sd)) hole(p, [x, y - t, z], 12, -1, 'cabineo');
+      }
     }
     col.cells.forEach((c, k) => {
       const x0 = colX(d, ci), cy = cellY(d, ci, k);
@@ -281,18 +346,17 @@ export function buildGeometry(d) {
   const frontTop = x => fOut(x);
 
   d.columns.forEach((col, ci) => {
-    const m = col.cells.length, mod = modOf(ci);
+    const m = col.cells.length;
     const x0c = colX(d, ci), w = col.w;
     let k = 0;
     while (k < m) {
       const cell = col.cells[k];
       const span = cell.span, k1 = k + span - 1;
       if (cell.front !== 'none') {
-        const outerL = ci === mod.c0, outerR = ci === mod.c1, outerT = k === 0, outerB = k1 === m - 1;
+        const outerL = ci === 0, outerR = ci === n - 1, outerT = k === 0, outerB = k1 === m - 1;
         const g = GAP / 2;
-        // bij modulegrens: voeg tussen de modules
-        let xl = outerL ? mod.x0 + (ci === 0 ? 0 : g) : x0c - t / 2 + g;
-        let xr = outerR ? mod.x1 - (ci === n - 1 ? 0 : g) : x0c + w + t / 2 - g;
+        let xl = outerL ? 0 : x0c - t / 2 + g;
+        let xr = outerR ? W : x0c + w + t / 2 - g;
         let yt = outerT ? Math.max(cellY(d, ci, k).top + t, H) : cellY(d, ci, k).top + t / 2 - g;
         let yb = outerB ? (P > 0 ? P : g) : cellY(d, ci, k1).bot - t / 2 + g;
         if (outerT && !shaped) yt = H;
@@ -457,6 +521,9 @@ export function buildGeometry(d) {
     }
   }
 
+  const cnt = kind => parts.reduce((a, p) => a + p.holes.filter(h => h.kind === kind).length, 0);
+  if (cnt('confirmat')) addHW('Confirmat 7×50 + afdekdop', cnt('confirmat'));
+  if (cnt('cab-pilot')) addHW('Lamello Cabineo 8', cnt('cab-pilot'));
   const dowelCount = parts.reduce((a, p) => a + p.holes.filter(h => h.kind === 'deuvel' && h.d === 8).length, 0);
   const dowel6 = parts.reduce((a, p) => a + p.holes.filter(h => h.kind === 'deuvel' && h.d === 6).length, 0);
   if (dowelCount) addHW('Deuvel beuken Ø8×35', dowelCount);
@@ -465,7 +532,7 @@ export function buildGeometry(d) {
 
   return {
     parts, handles, rails, picks, warnings: [...new Set(warnings)],
-    hardware: [...hw.values()], modules: mods,
+    hardware: [...hw.values()], seams, joinery: JS, jointCount,
     dims: { W, H, D, P, t, bt, zB, zF, Ds, tf, shaped, profile: profile(d), inner: innerPts(d, segs) },
   };
 }
@@ -493,4 +560,8 @@ function finalize(p) {
     ? p.prism.poly.map(([x, y]) => uv([x, y, p.prism.z0]))
     : [[0, 0], [f.L, 0], [f.L, f.B], [0, f.B]];
   for (const h of p.holes) { const [u, v] = uv(h.p); h.u = u; h.v = v; }
+  for (const b of p.bevels || []) {
+    const where = p.meta?.role === 'side' || p.meta?.drag === 'divider' ? 'bovenkant' : b.end === 'u0' ? 'kop 1' : 'kop 2';
+    p.notes.push(`${where} schuin ${String(b.angle).replace('.', ',')}° (lang aan zijde ${b.longA ? 'A' : 'B'})`);
+  }
 }

@@ -1,7 +1,8 @@
 // PDF-overzicht: axonometrie, vooraanzicht en zijaanzicht met maatvoering,
 // beslaglijst, frontenlijst, zaaglijst en zaagplannen.
 import { jsPDF } from 'jspdf';
-import { MATERIALS, FINISHES, HANDLE_TYPES, FRONT_TYPES, colorName, plinthH, grainOn } from './model.js';
+import { MATERIALS, FINISHES, HANDLE_TYPES, FRONT_TYPES, colorName, plinthH, grainOn, JOINERY } from './model.js';
+import { estimate, euro, SERVICES } from './costs.js';
 
 const PW = 297, PH = 210, M = 14;
 const INK = [35, 34, 32], MUTED = [139, 134, 124], LINE = [210, 205, 195], ACC = [201, 115, 58];
@@ -42,7 +43,7 @@ export async function exportPdf(d, geo, nest, { axo }) {
     ['Lades', `${cnt('drawer')} lades, ${geo.parts.filter(p => p.name === 'Binnenlade bodem').length} binnenlades`],
     ['Kleppen', String(cnt('flap-up') + cnt('flap-down'))],
     ['Grepen', d.handle.type === 'push' ? 'Push-to-open' : `${HANDLE_TYPES[d.handle.type].label}, ${FINISHES[d.handle.finish].label}`],
-    ['Verbindingen', 'Stomp, deuvels Ø8 × 35'],
+    ['Verbindingen', JOINERY[d.joinery || 'deuvel'].label + (geo.seams?.length ? `, ${geo.seams.length} naad in blad/bodem` : '')],
     ['Plaatdelen', `${geo.parts.length} st, ${nest.reduce((a, n) => a + n.sheets.length, 0)} platen ${d.sheet.L} × ${d.sheet.W}`],
   ];
   let y = M + 24;
@@ -57,6 +58,34 @@ export async function exportPdf(d, geo, nest, { axo }) {
   if (geo.warnings.length) {
     y += 2; doc.setFontSize(8); doc.setTextColor(...ACC);
     for (const w of geo.warnings) { const l = doc.splitTextToSize('• ' + clean(w), PW - M - x0); doc.text(l, x0, y); y += l.length * 3.6; }
+  }
+
+  // ---------- kostenraming ----------
+  header('Kostenraming en montage-uren');
+  {
+    const e = estimate(d, geo, nest);
+    const half = (PW - 2 * M) / 2 - 5;
+    let yy = M + 22;
+    yy = table(doc, M, yy, [{ t: 'Plaatmateriaal', w: 70 }, { t: 'Platen', w: 16, a: 'right' }, { t: 'Per plaat', w: 24, a: 'right' }, { t: 'Totaal', w: 24, a: 'right' }],
+      e.sheets.map(r => [r.label, String(r.qty), euro(r.unit), euro(r.total)]), header, 'Kostenraming (vervolg)', half);
+    yy += 4;
+    yy = table(doc, M, yy, [{ t: SERVICES[e.serviceMode].label, w: 86 }, { t: '', w: 24 }, { t: 'Totaal', w: 24, a: 'right' }],
+      e.service.length ? e.service.map(r => [r.name, '', euro(r.total)]) : [['Geen', '', euro(0)]], header, 'Kostenraming (vervolg)', half);
+    yy += 6;
+    doc.setDrawColor(...INK); doc.setLineWidth(0.4); doc.line(M, yy, M + half, yy);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...INK);
+    doc.text('Totaal (indicatief, incl. btw)', M, yy + 6); doc.text(euro(e.totals.all), M + half, yy + 6, { align: 'right' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(...MUTED);
+    doc.text(`Plaat ${euro(e.totals.sheets)}  ·  beslag ${euro(e.totals.hw)}  ·  ${SERVICES[e.serviceMode].label.toLowerCase()} ${euro(e.totals.service)}`, M, yy + 12);
+    doc.text(doc.splitTextToSize('Richtprijzen, aanpasbaar in de configurator. Exclusief lakwerk/olie, kantenband en transport.', half), M, yy + 17);
+    // uren
+    let y2 = yy + 30;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...INK);
+    doc.text(`Montage: ± ${Math.ceil(e.hours.total * 2) / 2} uur`, M, y2); doc.setFont('helvetica', 'normal');
+    y2 = table(doc, M, y2 + 6, [{ t: 'Onderdeel werk', w: 110 }, { t: 'Uren', w: 24, a: 'right' }], e.hours.lines.map(l => [l.name, l.h.toFixed(1)]), header, 'Montage-uren (vervolg)', half);
+    // beslag rechts
+    table(doc, M + half + 10, M + 22, [{ t: 'Beslag', w: 76 }, { t: 'Aantal', w: 14, a: 'right' }, { t: 'Per st.', w: 20, a: 'right' }, { t: 'Totaal', w: 22, a: 'right' }],
+      e.hw.map(r => [r.name, String(r.qty), euro(r.unit), euro(r.total)]), header, 'Kostenraming (vervolg)', half);
   }
 
   // ---------- 2. aanzichten ----------
@@ -173,8 +202,16 @@ function drawViews(doc, d, geo) {
     if (h) {
       doc.setLineDashPattern([1.2, 1], 0); doc.setLineWidth(0.15);
       const [x0, x1, y0, y1] = [X(b[0]), X(b[1]), Y(b[2]), Y(b[3])];
-      if (h === 'l') { doc.line(x1, y1, x0, (y0 + y1) / 2); doc.line(x1, y0, x0, (y0 + y1) / 2); }
-      if (h === 'r') { doc.line(x0, y1, x1, (y0 + y1) / 2); doc.line(x0, y0, x1, (y0 + y1) / 2); }
+      // bovenrand van het front (bij geknipte fronten de schuine lijn)
+      const topAt = xm => {
+        if (!p.prism) return b[3];
+        const tops = p.prism.poly.slice(2).slice().sort((a2, b2) => a2[0] - b2[0]);
+        for (let i = 0; i < tops.length - 1; i++) if (xm >= tops[i][0] - 0.01 && xm <= tops[i + 1][0] + 0.01) { const f = (xm - tops[i][0]) / ((tops[i + 1][0] - tops[i][0]) || 1); return tops[i][1] + (tops[i + 1][1] - tops[i][1]) * f; }
+        return b[3];
+      };
+      const yL = Y(topAt(b[0])), yR = Y(topAt(b[1]));
+      if (h === 'l') { const ym = (y0 + Y(topAt(b[0]))) / 2; doc.line(x1, yR, x0, ym); doc.line(x1, y0, x0, ym); }
+      if (h === 'r') { const ym = (y0 + Y(topAt(b[1]))) / 2; doc.line(x0, yL, x1, ym); doc.line(x0, y0, x1, ym); }
       if (h === 't') { doc.line(x0, y0, (x0 + x1) / 2, y1); doc.line(x1, y0, (x0 + x1) / 2, y1); }
       if (h === 'b') { doc.line(x0, y1, (x0 + x1) / 2, y0); doc.line(x1, y1, (x0 + x1) / 2, y0); }
       doc.setLineDashPattern([], 0);

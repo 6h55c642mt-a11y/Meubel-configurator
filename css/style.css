@@ -174,3 +174,13 @@ input[type=range] { grid-column: 2 / 5; width: 100%; accent-color: var(--accent)
 .toggle.mini-t input { width: 26px; height: 15px; }
 .toggle.mini-t input::after { width: 11px; height: 11px; }
 .toggle.mini-t input:checked::after { left: 13px; }
+
+.card.cost .big { font-family: var(--mono); font-size: 18px; font-weight: 500; }
+.costsplit { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); }
+.costsplit b { color: var(--ink); font-family: var(--mono); font-weight: 500; }
+.costlist li { align-items: center; gap: 6px; }
+.costlist li > span:first-child { flex: 1; font-size: 12.5px; }
+.costlist .tot { min-width: 74px; }
+.price { width: 64px; border: 1px solid var(--line2); border-radius: 6px; padding: 3px 5px; font-family: var(--mono); font-size: 12px; text-align: right; background: #fff; }
+.price.changed { border-color: var(--accent); background: var(--accent-soft); }
+.linkbtn { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0; text-decoration: underline; font-size: inherit; }

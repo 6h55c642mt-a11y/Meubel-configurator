@@ -11,7 +11,7 @@ Ontwerp een kast op maat in de browser en krijg alles wat je nodig hebt om hem z
 4. **Kolommen & vakken** – aantallen, breedtes; planken en schotten slepen in 3D of maten typen in de labels; planken vast (deuvels) of verstelbaar (gaatjesrij)
 5. **Fronten & interieur** – deur links/rechts, dubbele deur, klep omhoog/omlaag, lade; fronten over meerdere vakken; open vak, garderobestang, binnenlades
 6. **Grepen** – push-to-open, staafgreep, greeplijst, kantgreep, platte greep, knop; afwerking chroom, RVS, mat zwart, mat wit, messing, antraciet
-7. **Overzicht & export** – PDF-overzicht, DXF-zaagbestand, montagehandleiding (PDF), 3D-model voor Rhino (.3dm), projectbestand (JSON), deellink; nerf per materiaal aan/uit voor zuiniger nesten
+7. **Overzicht & export** – kostenraming (plaat, beslag, zaag-/CNC-service, instelbare richtprijzen) en montage-uren; PDF-overzicht, DXF-zaagbestand, montagehandleiding (PDF), 3D-model voor Rhino (.3dm), projectbestand (JSON), deellink; nerf per materiaal aan/uit voor zuiniger nesten
 
 Weergave: 3D/2D (orthografisch vooraanzicht), Render/Shaded/Lijnen, fronten dicht/open/weg, maten aan/uit.
 
@@ -22,7 +22,9 @@ Weergave: 3D/2D (orthografisch vooraanzicht), Render/Shaded/Lijnen, fronten dich
 - Opgelegde achterwand, geschroefd
 - Opliggende fronten met 3 mm voeg; potscharnieren Ø35 (vol/half opdek wordt automatisch bepaald)
 - Ladebakken met volledig uittrekbare geleiders (13 mm per zijde), lengte afgestemd op de diepte
-- Kasten breder dan de plaat worden automatisch in **modules** verdeeld (eigen zijwanden, gekoppeld met kastverbinders), zodat elk deuvelgat in massief plaatmateriaal landt
+- Verbindingssysteem per ontwerp: **deuvels**, **Confirmat** of **Lamello Cabineo** (alle bewerkingen in het vlak, CNC-vriendelijk)
+- Kasten breder dan de plaat: bovenblad, bodem en plint krijgen een **naad tegen de rechterzijde van een tussenschot** (linkerdeel draagt het hele schot), gekoppeld met Clamex of werkbladverbinders — geen dubbele schotten
+- Gaten aan weerszijden van een schot op dezelfde hoogte worden versprongen geboord
 - Hoge achterwanden worden gesplitst op het hart van een tussenschot (geschroefd)
 - Schuine bovenrand: schuine bladen met verstek, zijwanden en schotten met afgeschuinde bovenkant, planken eindigen onder de schuine rand, fronten en achterwand krijgen de echte contour
 
@@ -35,6 +37,9 @@ Weergave: 3D/2D (orthografisch vooraanzicht), Render/Shaded/Lijnen, fronten dich
 | `BOOR_A_D5` / `BOOR_B_D5` | gaatjesrij planksteunen Ø5 |
 | `BOOR_A_D6` / `BOOR_B_D6` | deuvels Ø6 ladebakken |
 | `POT_B_D35` | scharnierpotten Ø35 (binnenzijde front) |
+| `BOOR_x_D7_DOOR` | Confirmat-doorboring Ø7 |
+| `CAB_PILOT_x_D5` / `CABINEO_x` | Cabineo: voorboring in het ontvangende vlak / plaats van de freeszak (marker Ø12 — vervang door het Lamello-freesblok uit hun CAD-data) |
+| `AFSCHUINING` | kopse kant die schuin gezaagd moet worden, met hoek en lange zijde |
 | `TEKST` | onderdeelnummer, naam, maten, nerfrichting |
 
 Nesting met MaxRects; materialen met nerf worden niet gedraaid. Eenheden: mm. Gaten in de kopse kanten staan niet in de DXF (zie tegenstuk).
@@ -57,7 +62,7 @@ js/main.js      stappen-UI
 Lokaal draaien: `python3 -m http.server` in deze map en open http://localhost:8000.
 
 ## 3DM (Rhino)
-Elk plaatdeel is een gesloten extrusie (solid) met naam `NN Onderdeel`, laag per groep (Korpus, Plint, Achterwand, Fronten, Lades, Beslag) en user text: Nummer, Onderdeel, Materiaal, Lengte_mm, Breedte_mm, Dikte_mm, Opmerking. Grepen en garderobestangen als mesh. Eenheden: mm.
+Rhino 7-formaat (opent ook in Rhino 8). Elk plaatdeel is een gesloten extrusie (solid) met naam `NN Onderdeel`, laag per groep (Korpus, Plint, Achterwand, Fronten, Lades, Beslag) en user text: Nummer, Onderdeel, Materiaal, Lengte_mm, Breedte_mm, Dikte_mm, Opmerking. Grepen en garderobestangen als mesh. Eenheden: mm.
 
 ## Nog te doen
 - Ontwerpen synchroniseren met GitHub

@@ -64,6 +64,12 @@ export const SLIDE_LENGTHS = [270, 300, 350, 400, 450, 500, 550, 600];
 const MIN_COL = 120;
 const MIN_CELL = 60;
 
+export const JOINERY = {
+  deuvel:    { label: 'Deuvels', hint: 'Goedkoop en sterk. Gaten in het vlak via CNC, kopse gaten zelf boren met een deuvelmal. Verlijmd.' },
+  confirmat: { label: 'Confirmat', hint: 'Snel en sterk, geen lijm. Schroefkoppen zichtbaar aan de buitenkant (afdekdopjes).' },
+  cabineo:   { label: 'Lamello Cabineo', hint: 'Onzichtbaar en demonteerbaar, alle bewerkingen in het vlak: ideaal voor CNC. Duurder per verbinding.' },
+};
+
 export const SHAPE_PRESETS = [['rect', 'Rechthoek'], ['slope-r', 'Schuin ↘'], ['slope-l', 'Schuin ↙'], ['knee-r', 'Knieschot ↘'], ['knee-l', 'Knieschot ↙'], ['gable', 'Puntdak']];
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
@@ -90,6 +96,8 @@ export function defaultDesign() {
     handle: { type: 'kant', finish: 'zwart' },
     sheet: { L: 2500, W: 1250, kerf: 4, margin: 10 },
     shape: { on: false, pts: [] },
+    joinery: 'deuvel',
+    prices: {},
     grain: {},
     columns: [],
   };
@@ -108,7 +116,7 @@ export function defaultDesign() {
 
 export const plinthH = d => (d.plinth.on ? d.plinth.h : 0);
 export const backT = d => (d.back ? d.thinT : 0);
-export const breakCount = d => d.columns.slice(0, -1).filter(c => c.brk).length;
+export const breakCount = () => 0;
 export const innerW = d => d.W - 2 * d.t - breakCount(d) * d.t;
 export const innerH = d => d.H - 2 * d.t - plinthH(d);
 
@@ -224,18 +232,9 @@ export function normalize(d) {
     d.shape.pts = pts;
     d.H = Math.max(...pts.map(p => p[1]));
   }
-  // modulegrenzen: elk blad/bodem/achterwand moet op de plaat passen
-  const maxLen = (d.sheet ? d.sheet.L - 2 * d.sheet.margin : 2480);
-  for (let pass = 0; pass < 2; pass++) {
-    d.columns.forEach(c => { c.brk = false; });
-    const fit0 = fitInts(d.columns.map(c => c.w), innerW(d) - (n - 1) * t, MIN_COL);
-    d.columns.forEach((c, i) => { c.w = fit0[i]; });
-    let ms = 0;
-    for (let j = 0; j < n - 1; j++) {
-      const nextEnd = colX(d, j + 1) + d.columns[j + 1].w + t;
-      if (nextEnd - ms > maxLen) { d.columns[j].brk = true; ms = colX(d, j) + d.columns[j].w + t; }
-    }
-  }
+  d.columns.forEach(c => { delete c.brk; });
+  d.joinery = d.joinery || 'deuvel';
+  d.prices = d.prices || {};
   const ws = fitInts(d.columns.map(c => c.w), innerW(d) - (n - 1) * t, MIN_COL);
   d.columns.forEach((c, i) => { c.w = ws[i]; });
   d.columns.forEach((col, ci) => {
@@ -337,7 +336,7 @@ export function moveDividerTo(d, i, xLeft) {
 
 export function colX(d, i) {
   let x = d.t;
-  for (let j = 0; j < i; j++) x += d.columns[j].w + d.t + (d.columns[j].brk ? d.t : 0);
+  for (let j = 0; j < i; j++) x += d.columns[j].w + d.t;
   return x;
 }
 
