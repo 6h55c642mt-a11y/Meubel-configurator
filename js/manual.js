@@ -2,6 +2,7 @@
 // met 3D-lijntekeningen (nieuwe onderdelen geaccentueerd) en detailtekeningen.
 import { jsPDF } from 'jspdf';
 import { HANDLE_TYPES } from './model.js';
+import { drawPrep, drawGlossary } from './prep.js';
 
 const PW = 297, PH = 210, M = 12;
 const INK = [30, 30, 30], MUTED = [130, 126, 118], ACC = [201, 115, 58], PALE = [242, 201, 168], LINE = [215, 210, 200];
@@ -140,7 +141,8 @@ export async function buildManual(d, geo, viewer, progress = () => {}) {
   // ---------- pagina's ----------
   let first = true;
   const page = () => { if (!first) doc.addPage(); first = false; };
-  const foot = (i) => { doc.setFontSize(8); doc.setTextColor(...MUTED); doc.text(`${clean(d.name)}  ·  montagehandleiding`, M, PH - 6); doc.text(String(i), PW - M, PH - 6, { align: 'right' }); };
+  const foot = () => { const i = doc.getNumberOfPages(); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...MUTED); doc.text(`${clean(d.name)}  ·  montagehandleiding`, M, PH - 6); doc.text(String(i), PW - M, PH - 6, { align: 'right' }); };
+  const ctx = { page, foot, heading: (dd, t) => heading(dd, t) };
 
   // omslag
   progress('Omslag…');
@@ -154,6 +156,12 @@ export async function buildManual(d, geo, viewer, progress = () => {}) {
   // twee personen
   drawPeople(doc, PW - M - 22, PH - 22);
   doc.setFontSize(8); doc.text('Monteer met twee personen', PW - M - 10, PH - 9, { align: 'right' });
+  doc.setFontSize(9); doc.setTextColor(...MUTED);
+  doc.text('Inhoud: voorbereiding · planning · gereedschap en beslag · onderdelen · montagestappen · begrippenlijst', M, PH - 9);
+
+  // voorbereiding en planning
+  progress('Voorbereiding…');
+  const A = drawPrep(doc, ctx, d, geo);
 
   // gereedschap + beslag
   progress('Beslag…');
@@ -164,7 +172,7 @@ export async function buildManual(d, geo, viewer, progress = () => {}) {
   tools.forEach((t, i) => { toolIcon(doc, M + 3, 40 + i * 9); doc.text(t, M + 10, 41.5 + i * 9); });
   const items = geo.hardware.map(h => ({ name: h.name, qty: h.qty, icon: iconFor(h.name) }));
   hwGrid(doc, 105, 34, PW - 105 - M, items);
-  foot(2);
+  foot();
 
   // onderdelen (opengewerkt)
   progress('Onderdelen…');
@@ -179,10 +187,9 @@ export async function buildManual(d, geo, viewer, progress = () => {}) {
   doc.addImage(ex.url, 'PNG', ix, iy, imgW, imgH, undefined, 'FAST');
   ex.pts.forEach((pt, i) => bubble(doc, ix + pt[0] / ex.w * imgW, iy + pt[1] / ex.h * imgH, parts[i].num, false));
   partList(doc, ix + imgW + 6, 30, PW - M - (ix + imgW + 6), parts);
-  foot(3);
+  foot();
 
   // stappen
-  let pn = 4;
   for (let si = 0; si < steps.length; si++) {
     const s = steps[si];
     progress(`Stap ${si + 1} van ${steps.length}…`);
@@ -231,8 +238,10 @@ export async function buildManual(d, geo, viewer, progress = () => {}) {
         await drawDetail(doc, s.detail, dcx, dcy, r, d, geo, viewer);
       }
     }
-    foot(pn++);
+    foot();
   }
+  progress('Begrippen…');
+  drawGlossary(doc, ctx, A);
   progress('PDF opslaan…');
   return doc.output('blob');
 }

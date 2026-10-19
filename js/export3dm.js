@@ -53,6 +53,9 @@ export async function build3dm(d, geo, { extraMeshes = null } = {}) {
     const ex = rh.Extrusion.create(crv, pr.z1 - pr.z0, true);
     if (!ex) continue;
     ex.translate([0, 0, pr.z0]);
+    // three.js is Y-omhoog, Rhino Z-omhoog: (x, y, z) → (x, −z, y). Voorkant wijst naar −Y (Front-view),
+    // vloer = XY-vlak. Dezelfde omzetting als Mesh.createFromThreejsJSON voor de grepen.
+    ex.rotate(Math.PI / 2, [1, 0, 0], [0, 0, 0]);
     const at = new rh.ObjectAttributes();
     at.name = `${String(p.num).padStart(2, '0')} ${p.name}`;
     at.layerIndex = layerIdx[p.group] ?? layerIdx.korpus;

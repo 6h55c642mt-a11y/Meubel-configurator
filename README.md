@@ -55,6 +55,8 @@ js/nesting.js   plaatoptimalisatie
 js/dxf.js       DXF R12-export
 js/pdf.js       PDF-overzicht
 js/manual.js    montagehandleiding
+js/prep.js      voorbereiding, planning en begrippenlijst in de handleiding
+js/costs.js     kostenraming en urenschatting
 js/export3dm.js Rhino .3dm-export
 js/main.js      stappen-UI
 ```
@@ -62,7 +64,7 @@ js/main.js      stappen-UI
 Lokaal draaien: `python3 -m http.server` in deze map en open http://localhost:8000.
 
 ## 3DM (Rhino)
-Rhino 7-formaat (opent ook in Rhino 8). Elk plaatdeel is een gesloten extrusie (solid) met naam `NN Onderdeel`, laag per groep (Korpus, Plint, Achterwand, Fronten, Lades, Beslag) en user text: Nummer, Onderdeel, Materiaal, Lengte_mm, Breedte_mm, Dikte_mm, Opmerking. Grepen en garderobestangen als mesh. Eenheden: mm.
+Rhino 7-formaat (opent ook in Rhino 8), Z omhoog: de kast staat op het XY-vlak, achterkant tegen Y=0, voorkant richting −Y (Front-view). Elk plaatdeel is een gesloten extrusie (solid) met naam `NN Onderdeel`, laag per groep (Korpus, Plint, Achterwand, Fronten, Lades, Beslag) en user text: Nummer, Onderdeel, Materiaal, Lengte_mm, Breedte_mm, Dikte_mm, Opmerking. Grepen en garderobestangen als mesh. Eenheden: mm.
 
 ## Nog te doen
 - Ontwerpen synchroniseren met GitHub
