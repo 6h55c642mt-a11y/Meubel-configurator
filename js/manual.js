@@ -3,6 +3,7 @@
 import { jsPDF } from 'jspdf';
 import { HANDLE_TYPES } from './model.js';
 import { drawPrep, drawGlossary } from './prep.js';
+import { containsPoint } from './geometry.js';
 
 const PW = 297, PH = 210, M = 12;
 const INK = [30, 30, 30], MUTED = [130, 126, 118], ACC = [201, 115, 58], PALE = [242, 201, 168], LINE = [215, 210, 200];
@@ -38,7 +39,7 @@ export async function buildManual(d, geo, viewer, progress = () => {}) {
   for (const p of parts) for (const h of p.holes) {
     if (!['deuvel', 'confirmat', 'cab-pilot'].includes(h.kind)) continue;
     const n = p.frame.n, q = h.p.map((v, i) => v + n[i] * h.dir * 2);
-    const mate = parts.find(o => o !== p && [0, 1, 2].every(i => q[i] > o.box[i * 2] + 0.01 && q[i] < o.box[i * 2 + 1] - 0.01));
+    const mate = parts.find(o => o !== p && containsPoint(o, q));
     if (mate) joints.push({ a: p.num, b: mate.num, d: h.d, kind: h.kind });
   }
   const counted = new Set();
@@ -59,7 +60,7 @@ export async function buildManual(d, geo, viewer, progress = () => {}) {
     if (!add.size && !opts.always) return;
     add.forEach(n => present.add(n));
     const dw = opts.noDowels ? { c8: 0, c6: 0 } : dowelsFor(present, add);
-    const hw = [...(opts.hw || [])];
+    const hw = [...(opts.hw || []), ...(opts.hwExtra || [])];
     if (dw.c8) hw.unshift({ name: JL.name, qty: dw.c8, icon: JL.icon });
     if (dw.c6) hw.unshift({ name: 'Deuvel Ø6×30', qty: dw.c6, icon: 'deuvel' });
     steps.push({ title, add, visible: new Set(present), hw, text: opts.text || [], detail: opts.detail, cam: opts.cam, openAmt: opts.openAmt ?? 0, handles: !!opts.handles, rails: !!opts.rails, hlHandles: !!opts.hlHandles, mode: opts.mode });
@@ -77,19 +78,26 @@ export async function buildManual(d, geo, viewer, progress = () => {}) {
     detail: det,
   });
   step('Bodem', nums(is.bottom), {
-    text: [JL.join + ' Plaats de bodem op de plint, tegen de zijwand.', ...(geo.seams?.length ? ['De bodem bestaat uit meerdere delen: koppel de naad met de naadverbinders voordat je verder gaat.'] : []), ...(JS === 'deuvel' ? ['Veeg uitgeperste lijm direct weg met een vochtige doek.'] : [])],
+    text: [JL.join + ' Plaats de bodem op de plint, tegen de zijwand.', ...(geo.seams?.length ? ['De bodem bestaat uit meerdere delen: koppel de naad met de naadverbinders voordat je verder gaat. De naad valt op het hart van een tussenschot; elk deel ligt 9 mm op het schot.'] : []), ...(JS === 'deuvel' ? ['Veeg uitgeperste lijm direct weg met een vochtige doek.'] : [])],
     detail: geo.seams?.length ? 'naad' : det,
     hw: geo.seams?.length ? geo.hardware.filter(h => /Clamex|Werkbladverbinder/.test(h.name)).map(h => ({ name: h.name.replace(/ \(.*\)/, ''), qty: Math.ceil(h.qty / 2), icon: 'verbinder' })) : [],
   });
-  step('Tussenschotten', nums(is.divider), { text: ['Zet de tussenschotten op de bodem. ' + JL.join, 'Controleer met een winkelhaak of ze haaks staan.'], detail: 'haaks' });
+  const brk = (geo.brackets || []);
+  const brkHW = n => (n ? [{ name: 'Hoekverbinder 20×20×40', qty: n, icon: 'verbinder' }] : []);
+  step('Tussenschotten', nums(is.divider), {
+    text: ['Zet de tussenschotten op de bodem. ' + JL.join, ...(brk.some(b => b.where === 'bodem') ? ['Het schot op de naad krijgt geen deuvels: zet het aan beide zijden vast met hoekverbinders op de bodem, links in het linkerdeel en rechts in het rechterdeel.'] : []), 'Controleer met een winkelhaak of ze haaks staan.'],
+    detail: 'haaks', hw: brkHW(brk.filter(b => b.where === 'bodem').length),
+  });
   step('Vaste legplanken', nums(is.shelf), { text: ['Plaats de vaste legplanken tussen de zijwand en de schotten.', 'Werk van onder naar boven.'], detail: det });
   step('Zijwand rechts', rightSides, { text: ['Druk de rechter zijwand op alle planken en de bodem. ' + JL.join, ...(JS === 'deuvel' ? ['Gebruik lijmklemmen en laat ze zitten tot de lijm droog is.'] : [])], detail: JS === 'deuvel' ? 'klem' : det });
   step('Bovenblad', nums(is.top), {
     text: ['Plaats het bovenblad op de zijwanden en schotten. ' + JL.join,
       ...(geo.dims.shaped ? ['Schuine bladen: zet de verstekken eerst droog tegen elkaar. De zaaghoeken staan in de zaaglijst.'] : []),
-      ...(geo.seams?.length ? ['Koppel de naad tussen de bladdelen met de naadverbinders.'] : []),
+      ...(geo.seams?.length ? ['Koppel de naad tussen de bladdelen met de naadverbinders en schroef het schot op de naad aan beide zijden met hoekverbinders onder het blad.'] : []),
+      ...(brk.some(b => b.where === 'schuin') ? ['Schuine bladen: zet ze vast met hoekverbinders aan de binnenzijde van de wanden en schotten.'] : []),
       ...(JS === 'deuvel' ? ['Klem vast en laat minstens een uur drogen.'] : [])],
     detail: geo.dims.shaped ? 'verstek' : geo.seams?.length ? 'naad' : det,
+    hwExtra: brkHW(brk.filter(b => b.where !== 'bodem').length),
     hw: geo.seams?.length ? geo.hardware.filter(h => /Clamex|Werkbladverbinder/.test(h.name)).map(h => ({ name: h.name.replace(/ \(.*\)/, ''), qty: Math.floor(h.qty / 2), icon: 'verbinder' })) : [],
   });
   step('Achterwand', nums(is.back), {

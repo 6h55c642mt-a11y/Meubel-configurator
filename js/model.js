@@ -98,6 +98,7 @@ export function defaultDesign() {
     shape: { on: false, pts: [] },
     joinery: 'deuvel',
     prices: {},
+    detail3dm: false,
     grain: {},
     columns: [],
   };

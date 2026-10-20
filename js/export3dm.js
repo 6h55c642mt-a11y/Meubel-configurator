@@ -30,7 +30,7 @@ export function partPrism(p) {
   return { poly: [[b[0], b[2]], [b[1], b[2]], [b[1], b[3]], [b[0], b[3]]], z0: b[4], z1: b[5] };
 }
 
-export async function build3dm(d, geo, { extraMeshes = null } = {}) {
+export async function build3dm(d, geo, { extraMeshes = null, detail = null, cut = null } = {}) {
   const rh = await loadRhino();
   const doc = new rh.File3dm();
   doc.settings().modelUnitSystem = rh.UnitSystem.Millimeters;
@@ -84,7 +84,68 @@ export async function build3dm(d, geo, { extraMeshes = null } = {}) {
       doc.objects().add(mesh, at);
     }
   }
+  if (detail) addDetail(rh, doc, detail, cut);
   doc.strings().set('Project', d.name);
   const wo = new rh.File3dmWriteOptions(); wo.version = 7; // opent in Rhino 7 en 8
   return doc.toByteArrayOptions(wo);
+}
+
+// ---------- gedetailleerd model ----------
+const DLAYERS = {
+  Deuvels: [190, 150, 90], Schroeven: [90, 90, 95], Verbinders: [70, 110, 160], Scharnieren: [150, 155, 160],
+  Ladegeleiders: [120, 125, 130], Planksteunen: [60, 60, 60], Uitsparingen: [220, 60, 60], 'Platen met uitsparingen': [196, 160, 110],
+};
+const toRhino = g => { g.rotate(Math.PI / 2, [1, 0, 0], [0, 0, 0]); return g; };
+
+function cylSolid(rh, a, b, r) {
+  const v = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const len = Math.hypot(...v); if (len < 0.01) return null;
+  const u = v.map(x => x / len);
+  const ex = rh.Extrusion.createCylinderExtrusion(new rh.Cylinder(new rh.Circle(r), len), true, true);
+  if (!ex) return null;
+  // Z-as naar richting u draaien
+  const dz = u[2];
+  if (dz < -0.999999) ex.rotate(Math.PI, [1, 0, 0], [0, 0, 0]);
+  else if (dz < 0.999999) {
+    const axis = [-u[1], u[0], 0]; const n = Math.hypot(axis[0], axis[1]);
+    ex.rotate(Math.acos(dz), [axis[0] / n, axis[1] / n, 0], [0, 0, 0]);
+  }
+  ex.translate(a);
+  return toRhino(ex);
+}
+
+function boxSolid(rh, b) {
+  if (b[1] - b[0] < 0.01 || b[3] - b[2] < 0.01 || b[5] - b[4] < 0.01) return null;
+  const pl = new rh.Polyline(5);
+  for (const [x, y] of [[b[0], b[2]], [b[1], b[2]], [b[1], b[3]], [b[0], b[3]], [b[0], b[2]]]) pl.add(x, y, 0);
+  const ex = rh.Extrusion.create(pl.toPolylineCurve(), b[5] - b[4], true);
+  if (!ex) return null;
+  ex.translate([0, 0, b[4]]);
+  return toRhino(ex);
+}
+
+function addDetail(rh, doc, detail, cut) {
+  const idx = {};
+  for (const [name, c] of Object.entries(DLAYERS)) {
+    const la = new rh.Layer();
+    la.name = name; la.color = { r: c[0], g: c[1], b: c[2], a: 255 };
+    if (name === 'Platen met uitsparingen' || name === 'Uitsparingen') la.visible = false;
+    idx[name] = doc.layers().add(la);
+  }
+  const put = (geom, layer, name) => {
+    if (!geom) return;
+    const at = new rh.ObjectAttributes(); at.name = name; at.layerIndex = idx[layer] ?? idx.Planksteunen;
+    doc.objects().add(geom, at);
+  };
+  for (const it of detail.items) {
+    put(it.cyl ? cylSolid(rh, it.cyl.a, it.cyl.b, it.cyl.r) : boxSolid(rh, it.box), it.layer, it.name);
+  }
+  for (const c of detail.cuts) put(cylSolid(rh, c.a, c.b, c.r), 'Uitsparingen', `Uitsparing ${c.kind} · deel ${c.part}`);
+  for (const m of cut || []) {
+    const mesh = rh.Mesh.createFromThreejsJSON({ data: {
+      attributes: { position: { itemSize: 3, type: 'Float32Array', array: m.positions, normalized: false } },
+      index: { type: 'Uint32Array', array: m.index },
+    } });
+    if (mesh) { mesh.normals().computeNormals?.(); put(mesh, 'Platen met uitsparingen', m.name); }
+  }
 }

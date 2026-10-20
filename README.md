@@ -23,7 +23,8 @@ Weergave: 3D/2D (orthografisch vooraanzicht), Render/Shaded/Lijnen, fronten dich
 - Opliggende fronten met 3 mm voeg; potscharnieren Ø35 (vol/half opdek wordt automatisch bepaald)
 - Ladebakken met volledig uittrekbare geleiders (13 mm per zijde), lengte afgestemd op de diepte
 - Verbindingssysteem per ontwerp: **deuvels**, **Confirmat** of **Lamello Cabineo** (alle bewerkingen in het vlak, CNC-vriendelijk)
-- Kasten breder dan de plaat: bovenblad, bodem en plint krijgen een **naad tegen de rechterzijde van een tussenschot** (linkerdeel draagt het hele schot), gekoppeld met Clamex of werkbladverbinders — geen dubbele schotten
+- Kasten breder dan de plaat: bovenblad, bodem en plint krijgen een **naad op het hart van een tussenschot** (elk deel 9 mm oplegging), gekoppeld met Clamex of werkbladverbinders; het schot op de naad zit met hoekverbinders vast — geen dubbele schotten
+- Schuine bladen met een helling > 10° worden met hoekverbinders bevestigd (haaks boren zou de kopse kant van de wand uitlopen)
 - Gaten aan weerszijden van een schot op dezelfde hoogte worden versprongen geboord
 - Hoge achterwanden worden gesplitst op het hart van een tussenschot (geschroefd)
 - Schuine bovenrand: schuine bladen met verstek, zijwanden en schotten met afgeschuinde bovenkant, planken eindigen onder de schuine rand, fronten en achterwand krijgen de echte contour
@@ -57,6 +58,8 @@ js/pdf.js       PDF-overzicht
 js/manual.js    montagehandleiding
 js/prep.js      voorbereiding, planning en begrippenlijst in de handleiding
 js/costs.js     kostenraming en urenschatting
+js/detail.js    beslag en uitsparingen voor het gedetailleerde model
+js/csg.js       platen met uitsparingen (CSG)
 js/export3dm.js Rhino .3dm-export
 js/main.js      stappen-UI
 ```
@@ -65,6 +68,8 @@ Lokaal draaien: `python3 -m http.server` in deze map en open http://localhost:80
 
 ## 3DM (Rhino)
 Rhino 7-formaat (opent ook in Rhino 8), Z omhoog: de kast staat op het XY-vlak, achterkant tegen Y=0, voorkant richting −Y (Front-view). Elk plaatdeel is een gesloten extrusie (solid) met naam `NN Onderdeel`, laag per groep (Korpus, Plint, Achterwand, Fronten, Lades, Beslag) en user text: Nummer, Onderdeel, Materiaal, Lengte_mm, Breedte_mm, Dikte_mm, Opmerking. Grepen en garderobestangen als mesh. Eenheden: mm.
+
+**Gedetailleerd model** (schakelaar bij de export): extra lagen *Deuvels*, *Schroeven*, *Verbinders*, *Scharnieren* (kom, arm, montageplaat), *Ladegeleiders*, *Planksteunen* als solids; *Uitsparingen* (verborgen) met elk boorgat als cilinder-solid — `BooleanDifference` in Rhino trekt ze van de platen af; *Platen met uitsparingen* (verborgen) met de al doorgerekende platen als mesh (CSG in de browser met three-bvh-csg).
 
 ## Nog te doen
 - Ontwerpen synchroniseren met GitHub

@@ -147,8 +147,9 @@ export function buildGeometry(d) {
   const zAlt = zDowels.map(z => (z < (zB + zF) / 2 ? z + 32 : z - 32));
 
   // ---------- naden: bladen/bodem langer dan de plaat ----------
-  // naad tegen de rechterzijde van een tussenschot: het linkerdeel draagt het hele schot
-  const seamCands = d.columns.slice(0, -1).map((c, i) => colRight(i) + t);
+  // naad op het hart van een tussenschot: elk deel ligt 9 mm (t/2) op het schot.
+  // Het schot wordt daar niet gedeuveld (de naad zit op die plek) maar met hoekverbinders vastgezet.
+  const seamCands = d.columns.slice(0, -1).map((c, i) => colRight(i) + t / 2);
   const seams = [];
   {
     let cur = 0;
@@ -190,7 +191,8 @@ export function buildGeometry(d) {
     if (colHasLoose(ci)) for (const y of pinYs(xFace)) for (const z of pinRows) hole(sp, [xFace, y, z], 5, dir, 'pin');
   }
   // tussenschotten
-  const divCenters = [], dividers = [];
+  const divCenters = [], dividers = [], brackets = [];
+  const isSeam = x => seams.some(sx => Math.abs(sx - x) < 0.5);
   for (let i = 0; i < n - 1; i++) {
     const xl = colRight(i);
     const hTop = innerRange(d, xl, xl + t, segs).max;
@@ -206,8 +208,18 @@ export function buildGeometry(d) {
       }
       if (colHasLoose(ci)) for (const y of pinYs(xFace)) for (const z of pinRows) hole(dv, [xFace, y, z], 5, dir, 'pin');
     }
-    const B = bottomAt(xl + t / 2);
-    for (const z of zDowels) connect(B, [xl + t / 2, P + t, z], 1, [0, 1, 0], dv, { axis: 0, value: xl, dir: -1 });
+    if (isSeam(xl + t / 2)) {
+      dv.meta.seam = true;
+      // hoekverbinders aan beide zijden, onder (op de bodem) en boven (onder het blad)
+      const yTopIn = innerRange(d, xl, xl + t, segs).min;
+      for (const [xf, side] of [[xl, -1], [xl + t, 1]]) for (const z of zDowels) {
+        brackets.push({ x: xf, side, y: P + t, z, where: 'bodem' });
+        brackets.push({ x: xf, side, y: yTopIn, z, where: 'blad' });
+      }
+    } else {
+      const B = bottomAt(xl + t / 2);
+      for (const z of zDowels) connect(B, [xl + t / 2, P + t, z], 1, [0, 1, 0], dv, { axis: 0, value: xl, dir: -1 });
+    }
   }
   // bovenblad(en): één per segment van de bovenrand, extra gesplitst op naden
   const xsAll = [...new Set([0, W, ...profile(d).map(p => p[0]), ...seams].map(x => Math.round(x * 100) / 100))].sort((p, q) => p - q);
@@ -215,7 +227,7 @@ export function buildGeometry(d) {
   const topHoles = [
     { x: t / 2, B: sideParts.links, bFace: { axis: 0, value: t, dir: 1 } },
     { x: W - t / 2, B: sideParts.rechts, bFace: { axis: 0, value: W - t, dir: -1 } },
-    ...dividers.map(dv => ({ x: dv.box[0] + t / 2, B: dv, bFace: { axis: 0, value: dv.box[0], dir: -1 } })),
+    ...dividers.filter(dv => !dv.meta.seam).map(dv => ({ x: dv.box[0] + t / 2, B: dv, bFace: { axis: 0, value: dv.box[0], dir: -1 } })),
   ];
   const nTop = xsAll.length - 1;
   for (let i = 0; i < nTop; i++) {
@@ -229,7 +241,20 @@ export function buildGeometry(d) {
     } else {
       p = slopedPanel(name, sg, xa, xb, vertical.some(v => Math.abs(v - xa) < 0.5), vertical.some(v => Math.abs(v - xb) < 0.5));
       const Nn = p.frame.n;
-      for (const th of topHoles) if (th.x > xa && th.x < xb) for (const z of zDowels) connect(p, [th.x, gIn(th.x), z], -1, [-Nn[0], -Nn[1], 0], th.B, th.bFace);
+      const angle = Math.abs(Math.atan(sg.k)) * 180 / Math.PI;
+      if (angle <= 10) {
+        for (const th of topHoles) if (th.x > xa && th.x < xb) for (const z of zDowels) connect(p, [th.x, gIn(th.x), z], -1, [-Nn[0], -Nn[1], 0], th.B, th.bFace);
+      } else {
+        // loodrecht boren loopt bij een helling > 10° de kopse kant van de 18 mm-plaat uit: hoekverbinders
+        p.meta.brackets = true;
+        for (const th of topHoles) if (th.x > xa && th.x < xb) {
+          const faces = th.B === sideParts.links ? [[t, 1]] : th.B === sideParts.rechts ? [[W - t, -1]] : [[th.x - t / 2, -1], [th.x + t / 2, 1]];
+          for (const [xf, side] of faces) {
+            const yy = Math.min(gIn(xf), gIn(xf + side * 20));
+            for (const z of zDowels) brackets.push({ x: xf, side, y: yy, z, where: 'schuin' });
+          }
+        }
+      }
     }
   }
   // plint
@@ -255,7 +280,11 @@ export function buildGeometry(d) {
     const nm = JS === 'cabineo' ? 'Lamello Clamex P-14 (naad bovenblad/bodem)' : 'Werkbladverbinder 150 mm + lamello (naad bovenblad/bodem)';
     addHW(nm, seams.length * per * 2);
     if (P > 0) addHW('Verbindingslat plint (achter de naad, gelijmd)', seams.length);
-    warnings.push(`Bovenblad en bodem hebben ${seams.length} naad${seams.length > 1 ? 'en' : ''} tegen een tussenschot (plaat max. ${maxL} mm).`);
+    warnings.push(`Bovenblad en bodem hebben ${seams.length} naad${seams.length > 1 ? 'en' : ''} op het hart van een tussenschot (plaat max. ${maxL} mm); elk deel ligt ${t / 2} mm op het schot.`);
+  }
+  if (brackets.length) {
+    addHW('Hoekverbinder staal 20×20×40 mm + 4 schroeven 3,5×16', brackets.length);
+    if (brackets.some(b => b.where === 'schuin')) warnings.push('Schuine bladen (helling > 10°) worden met hoekverbinders op de wanden gezet; haaks boren zou de kopse kant uitlopen.');
   }
   // achterwand (zo nodig gesplitst op het hart van een tussenschot)
   if (d.back) {
@@ -532,7 +561,7 @@ export function buildGeometry(d) {
 
   return {
     parts, handles, rails, picks, warnings: [...new Set(warnings)],
-    hardware: [...hw.values()], seams, joinery: JS, jointCount,
+    hardware: [...hw.values()], seams, brackets, joinery: JS, jointCount,
     dims: { W, H, D, P, t, bt, zB, zF, Ds, tf, shaped, profile: profile(d), inner: innerPts(d, segs) },
   };
 }
@@ -564,4 +593,19 @@ function finalize(p) {
     const where = p.meta?.role === 'side' || p.meta?.drag === 'divider' ? 'bovenkant' : b.end === 'u0' ? 'kop 1' : 'kop 2';
     p.notes.push(`${where} schuin ${String(b.angle).replace('.', ',')}° (lang aan zijde ${b.longA ? 'A' : 'B'})`);
   }
+}
+
+// Ligt punt q (app-coördinaten) in de werkelijke vorm van onderdeel p?
+export function containsPoint(p, q, eps = 0.01) {
+  const b = p.box;
+  if (![0, 1, 2].every(i => q[i] > b[i * 2] + eps && q[i] < b[i * 2 + 1] - eps)) return false;
+  if (!p.prism) return true;
+  const pr = p.prism;
+  if (q[2] < pr.z0 + eps || q[2] > pr.z1 - eps) return false;
+  let c = false;
+  for (let i = 0, j = pr.poly.length - 1; i < pr.poly.length; j = i++) {
+    const [xi, yi] = pr.poly[i], [xj, yj] = pr.poly[j];
+    if ((yi > q[1]) !== (yj > q[1]) && q[0] < (xj - xi) * (q[1] - yi) / (yj - yi) + xi) c = !c;
+  }
+  return c;
 }

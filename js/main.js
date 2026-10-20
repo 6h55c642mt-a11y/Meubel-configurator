@@ -329,7 +329,8 @@ const BODIES = {
         <button class="btn accent wide" data-act="pdf"><span>PDF-overzicht</span><span>tekening · beslag · zaaglijst</span></button>
         <button class="btn wide" data-act="dxf"><span>DXF-zaagbestand</span><span>genummerd · boorgaten</span></button>
         <button class="btn wide" data-act="manual"><span>Montagehandleiding</span><span>PDF · stap voor stap</span></button>
-        <button class="btn wide" data-act="rhino"><span>3D-model voor Rhino</span><span>.3dm · lagen · namen</span></button>
+        <button class="btn wide" data-act="rhino"><span>3D-model voor Rhino</span><span>.3dm · Rhino 7 en 8</span></button>
+        <label class="toggle"><input type="checkbox" data-field="detail3dm" ${d.detail3dm ? 'checked' : ''}> Gedetailleerd model: deuvels, schroeven, scharnieren, ladegeleiders en uitsparingen</label>
         <div class="row">
           <button class="btn ghost small" data-act="json">Projectbestand (.json)</button>
           <button class="btn ghost small" data-act="open">Openen…</button>
@@ -612,9 +613,19 @@ async function export3dm(btn) {
   btn.disabled = true;
   try {
     const { build3dm } = await import('./export3dm.js');
-    const bytes = await build3dm(state.d, state.geo, { extraMeshes: viewer.hardwareMeshes() });
+    let detail = null, cut = null;
+    if (state.d.detail3dm) {
+      const old = btn.innerHTML;
+      btn.innerHTML = '<span>Beslag en uitsparingen…</span>';
+      const { buildDetail } = await import('./detail.js');
+      const { cutMeshes } = await import('./csg.js');
+      detail = buildDetail(state.d, state.geo);
+      cut = await cutMeshes(state.geo, detail, msg => { btn.innerHTML = `<span>${msg}</span>`; });
+      btn.innerHTML = old;
+    }
+    const bytes = await build3dm(state.d, state.geo, { extraMeshes: viewer.hardwareMeshes(), detail, cut });
     download(`${slug(state.d.name)}.3dm`, new Blob([bytes], { type: 'application/octet-stream' }));
-    toast('3DM-bestand gedownload');
+    toast(state.d.detail3dm ? 'Gedetailleerd 3DM-bestand gedownload' : '3DM-bestand gedownload');
   } catch (err) { console.error(err); toast('3DM maken mislukt: ' + err.message); }
   finally { btn.disabled = false; }
 }
