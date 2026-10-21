@@ -173,12 +173,12 @@ function drawViews(doc, d, geo) {
   const DD = d.D + tf;
   const areaX = M + 18, areaY = M + 30, areaW = PW - 2 * M - 30, areaH = PH - areaY - 26;
   const gap = 260;
-  const s = Math.min(areaW / (d.W + gap + DD + 200), areaH / (d.H + 260));
+  const s = Math.min(areaW / (d.W + gap + DD + 200), areaH / (d.H + 340));
   const ox = areaX + 10, oy = areaY + areaH - 12; // vloer
   const X = x => ox + x * s, Y = y => oy - y * s;
 
   doc.setFontSize(8); doc.setTextColor(...MUTED);
-  doc.text(`VOORAANZICHT  1:${niceScale(s)}`, X(0), M + 21);
+  doc.text(`VOORAANZICHT  1:${niceScale(s)}`, X(0), M + 18);
 
   // korpus
   doc.setDrawColor(...INK);
@@ -274,7 +274,7 @@ function drawViews(doc, d, geo) {
   const sx = d.W + gap; // x-positie (mm) van zijaanzicht
   const Z = z => X(sx + z);
   doc.setFontSize(8); doc.setTextColor(...MUTED);
-  doc.text('ZIJAANZICHT', Z(0), M + 21);
+  doc.text('ZIJAANZICHT', Z(0), M + 18);
   doc.setDrawColor(...INK);
   const sideRect = (z0, z1, y0, y1, lw = 0.3) => { doc.setLineWidth(lw); doc.rect(Z(z0), Y(y1), (z1 - z0) * s, (y1 - y0) * s); };
   sideRect(dm.zB, dm.zF, 0, d.H - d.t, 0.35);          // zijwand

@@ -163,9 +163,11 @@ const BODIES = {
             <div class="ptrow"><span class="idx">P${i + 1}</span>
               <div class="num"><span class="unit">x</span><input data-field="pt" data-i="${i}" data-c="0" value="${p[0]}" ${i === 0 || i === d.shape.pts.length - 1 ? 'disabled' : ''}></div>
               <div class="num"><span class="unit">y</span><input data-field="pt" data-i="${i}" data-c="1" value="${p[1]}"></div>
-              ${i > 0 && i < d.shape.pts.length - 1 ? `<button class="x" data-act="delpt" data-i="${i}" aria-label="Punt verwijderen">✕</button>` : '<span></span>'}
+              ${i > 0 && i < d.shape.pts.length - 1 ? `<button class="x" data-act="delpt" data-i="${i}" aria-label="Punt verwijderen">✕</button>`
+                : `<button class="x floorbtn ${p[1] === 0 ? 'on' : ''}" data-act="floorpt" data-i="${i}" title="${p[1] === 0 ? 'Loopt tot de vloer' : 'Tot de vloer laten doorlopen'}">⤓</button>`}
             </div>`).join('')}</div>
-          <div class="row"><button class="btn ghost small" data-act="addpt">+ Punt toevoegen</button><span class="hint">Sleep de oranje punten in de weergave; in 2D gaat dat het makkelijkst.</span></div>` :
+          <div class="row"><button class="btn ghost small" data-act="addpt">+ Punt toevoegen</button><span class="hint">Sleep de oranje punten in de weergave; in 2D gaat dat het makkelijkst.</span></div>
+          <div class="hint">Een eindpunt met y = 0 (knop ⤓) laat de schuine kant strak tot op de vloer doorlopen: de zijwand vervalt, bodem en plint stoppen tegen de schuine plaat. Een eindpunt dat lager staat dan de kleinste zijwand die nog past, klikt vanzelf vast op de vloer.</div>` :
           '<div class="hint">Kies een vorm om een schuine of geknikte bovenrand te maken, bijvoorbeeld onder een schuin dak of een trap. Daarna kun je de punten verslepen of in mm invullen.</div>'}
       </div>
       <div class="field"><label>Plaatdikte korpus en fronten</label>${seg('set', [[15, '15 mm'], [18, '18 mm'], [22, '22 mm'], [25, '25 mm']], d.t, 'data-field="t"')}</div>
@@ -477,6 +479,7 @@ document.addEventListener('click', e => {
     case 'shape': commit(d => setShapePreset(d, val)); if (val !== 'rect' && state.view.dim === '3d') { state.view.dim = '2d'; viewer.setView(state.view); renderViewbar(); renderFoot(); } viewer.fit(); break;
     case 'addpt': commit(d => addShapePoint(d)); break;
     case 'delpt': commit(d => { d.shape.pts.splice(+b.dataset.i, 1); }); break;
+    case 'floorpt': commit(d => { const p = d.shape.pts[+b.dataset.i]; if (p[1] === 0) { const nb = d.shape.pts[+b.dataset.i === 0 ? 1 : d.shape.pts.length - 2]; p[1] = Math.max(Math.round(nb[1] * 0.4), 400); } else p[1] = 0; }); break;
     case 'rhino': export3dm(b); break;
     case 'joinery': commit(d => { d.joinery = val; }); break;
     case 'svc': commit(d => { d.prices.service = { ...(d.prices.service || {}), mode: val }; }); break;

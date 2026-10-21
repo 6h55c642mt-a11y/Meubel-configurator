@@ -197,9 +197,25 @@ export function addShapePoint(d) {
 }
 export function moveShapePoint(d, i, x, y) {
   const pts = d.shape.pts, n = pts.length;
-  const minY = plinthH(d) + 2 * d.t + 120;
+  const end = i === 0 || i === n - 1;
+  const minY = end ? 0 : plinthH(d) + 2 * d.t + 120;
   if (i > 0 && i < n - 1) pts[i][0] = clamp(Math.round(x), pts[i - 1][0] + 20, pts[i + 1][0] - 20);
   pts[i][1] = clamp(Math.round(y), minY, 3000);
+}
+
+// laagste neushoogte waarbij er nog een (korte) zijwand onder het schuine blad past;
+// daaronder loopt het blad door tot de vloer
+export function endMinY(d, p, nb) {
+  const dx = Math.abs(nb[0] - p[0]) || 1, dy = nb[1] - p[1];
+  const cos = dx / Math.hypot(dx, dy);
+  return Math.ceil(plinthH(d) + d.t + 40 + d.t / cos);
+}
+
+// eind van de kast op de vloer? (geen zijwand, schuin blad tot de vloer)
+export function floorEnds(d) {
+  if (!d.shape?.on) return { links: false, rechts: false };
+  const pts = d.shape.pts;
+  return { links: pts[0][1] === 0, rechts: pts[pts.length - 1][1] === 0 };
 }
 
 // Verdeel een totaal over items naar verhouding, gehele mm, rest in laatste.
@@ -229,7 +245,18 @@ export function normalize(d) {
     pts[0][0] = 0; pts[pts.length - 1][0] = d.W;
     pts.sort((a, b) => a[0] - b[0]);
     const minY = plinthH(d) + 2 * t + 120;
-    pts = pts.map(([x, y]) => [x, clamp(Math.round(y), minY, 3000)]);
+    // eindpunten mogen tot op de vloer: onder de minimale neushoogte klikt het punt vast op y = 0
+    const last = pts.length - 1;
+    pts = pts.map(([x, y], i) => {
+      y = Math.round(y);
+      if (i === 0 || i === last) {
+        const nb = pts[i === 0 ? 1 : last - 1];
+        const min = endMinY(d, [x, y], nb);
+        return [x, y <= 0 || y < min ? 0 : clamp(y, min, 3000)];
+      }
+      return [x, clamp(y, minY, 3000)];
+    });
+    if (pts.every(p => p[1] === 0)) pts[0][1] = Math.max(minY, d.H);
     d.shape.pts = pts;
     d.H = Math.max(...pts.map(p => p[1]));
   }

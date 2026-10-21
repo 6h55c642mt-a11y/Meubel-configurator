@@ -184,3 +184,6 @@ input[type=range] { grid-column: 2 / 5; width: 100%; accent-color: var(--accent)
 .price { width: 64px; border: 1px solid var(--line2); border-radius: 6px; padding: 3px 5px; font-family: var(--mono); font-size: 12px; text-align: right; background: #fff; }
 .price.changed { border-color: var(--accent); background: var(--accent-soft); }
 .linkbtn { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0; text-decoration: underline; font-size: inherit; }
+
+.floorbtn { font-size: 15px; color: var(--muted); }
+.floorbtn.on { color: var(--accent); }

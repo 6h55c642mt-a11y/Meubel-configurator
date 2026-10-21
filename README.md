@@ -24,6 +24,8 @@ Weergave: 3D/2D (orthografisch vooraanzicht), Render/Shaded/Lijnen, fronten dich
 - Ladebakken met volledig uittrekbare geleiders (13 mm per zijde), lengte afgestemd op de diepte
 - Verbindingssysteem per ontwerp: **deuvels**, **Confirmat** of **Lamello Cabineo** (alle bewerkingen in het vlak, CNC-vriendelijk)
 - Kasten breder dan de plaat: bovenblad, bodem en plint krijgen een **naad op het hart van een tussenschot** (elk deel 9 mm oplegging), gekoppeld met Clamex of werkbladverbinders; het schot op de naad zit met hoekverbinders vast — geen dubbele schotten
+- Een eindpunt van de bovenrand op y = 0 laat de schuine kant tot op de vloer doorlopen: geen zijwand, bodem/plint/planken stoppen met een schuine kop tegen de schuine plaat (hoekverbinders), de voet van het blad wordt horizontaal afgezaagd
+- Bovenbladnaden worden los van de bodemnaden bepaald, gemeten langs de helling
 - Schuine bladen met een helling > 10° worden met hoekverbinders bevestigd (haaks boren zou de kopse kant van de wand uitlopen)
 - Gaten aan weerszijden van een schot op dezelfde hoogte worden versprongen geboord
 - Hoge achterwanden worden gesplitst op het hart van een tussenschot (geschroefd)
